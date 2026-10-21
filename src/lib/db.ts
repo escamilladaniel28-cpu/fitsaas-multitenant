@@ -29,7 +29,6 @@ export async function query<T = any>(
   const client = await pool.connect();
   try {
     if (schemaName) {
-      // Sanitize schema name to prevent SQL injection
       const sanitizedSchema = schemaName.replace(/[^a-zA-Z0-9_]/g, '');
       await client.query(`SET search_path TO "${sanitizedSchema}", public;`);
     } else {
@@ -38,9 +37,13 @@ export async function query<T = any>(
     const res = await client.query(text, params);
     return res.rows as T[];
   } finally {
-    // Reset search path before releasing back to pool
-    await client.query(`SET search_path TO public;`).catch(() => {});
-    client.release();
+    let destroy = false;
+    try {
+      await client.query(`SET search_path TO public;`);
+    } catch {
+      destroy = true;
+    }
+    client.release(destroy);
   }
 }
 
@@ -52,6 +55,7 @@ export async function withTenantTransaction<T>(
   callback: (client: PoolClient) => Promise<T>
 ): Promise<T> {
   const client = await pool.connect();
+  let destroy = false;
   try {
     await client.query('BEGIN');
     const sanitizedSchema = schemaName.replace(/[^a-zA-Z0-9_]/g, '');
@@ -60,10 +64,18 @@ export async function withTenantTransaction<T>(
     await client.query('COMMIT');
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {
+      destroy = true;
+    });
     throw error;
   } finally {
-    await client.query(`SET search_path TO public;`).catch(() => {});
-    client.release();
+    if (!destroy) {
+      try {
+        await client.query(`SET search_path TO public;`);
+      } catch {
+        destroy = true;
+      }
+    }
+    client.release(destroy);
   }
 }

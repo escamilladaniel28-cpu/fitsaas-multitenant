@@ -63,7 +63,7 @@ Este es un **Proyecto Integrador de Evaluación Individual (duración: 1 semana)
 * `package.json`: Scripts: `npm run dev`, `npm run build`, `npm run lint`, `npm test`.
 
 ### Capa de Lógica y Base de Datos (`src/lib/`)
-* `src/lib/db.ts`: Pool de conexiones `pg` y funciones `query(sql, params, schemaName)` y `withTenantTransaction()`. Maneja el cambio seguro de `search_path` por petición.
+* `src/lib/db.ts`: Pool de conexiones `pg` y funciones `query(sql, params, schemaName)` y `withTenantTransaction()`. Implementa **destrucción de conexiones envenenadas** (`client.release(destroy)`) si ocurre un fallo al resetear `SET search_path TO public` o durante un `ROLLBACK`, garantizando inmunidad contra fugas de schema entre tenants concurrentes.
 * `src/lib/tenants.ts`: 
   * `initGlobalSchema()`: Crea tablas `public.tenants`, `public.users` y `public.idempotency_records`.
   * `createTenantSchema(slug, name)`: Crea dinámicamente `CREATE SCHEMA "tenant_<slug>"` y sus tablas `planes`, `socios`, `asistencias` con planes iniciales.
