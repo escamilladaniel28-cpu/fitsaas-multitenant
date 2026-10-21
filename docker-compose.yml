@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fitsaas_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-fitsaas_db}
+    ports:
+      - "${DB_PORT:-5436}:5432"
+    volumes:
+      - fitsaas_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fitsaas_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fitsaas_network
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fitsaas_web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/${DB_NAME:-fitsaas_db}
+      JWT_SECRET: ${JWT_SECRET:-super-secret-fitsaas-token-key-2026}
+      PORT: 3001
+      NODE_ENV: production
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-flash}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+    ports:
+      - "${PORT:-3001}:3001"
+    networks:
+      - fitsaas_network
+
+volumes:
+  fitsaas_pgdata:
+
+networks:
+  fitsaas_network:
+    driver: bridge
