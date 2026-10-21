@@ -129,11 +129,14 @@ npm run build
 ---
 
 ## 📌 5. Estado Actual del Repositorio Git
+* **Autor oficial:** Milton Escamilla <escamilladaniel28@gmail.com> (GitHub: `dmcampo`)
 * **Rama:** `main`
-* **Commits realizados:**
-  * `ecb7500` - `feat(infra): initialize Next.js 16, PostgreSQL docker-compose and CI/CD workflow`
-  * `dbf5db9` - `feat(core): implement schema-per-tenant provisioning, auth, idempotency and rate limiting`
-  * `e587747` - `feat(ui): add domain CRUD, SSG landing, SSR dashboard and full documentation`
+* **Commits realizados (todos con autoría de Milton Escamilla):**
+  * `49b19e5` - `feat(infra): initialize Next.js 16, PostgreSQL docker-compose and CI/CD workflow`
+  * `8fbea83` - `feat(core): implement schema-per-tenant provisioning, auth, idempotency and rate limiting`
+  * `a0c07d9` - `feat(ui): add domain CRUD, SSG landing, SSR dashboard and full documentation`
+  * `488e651` - `docs: add CONTEXT_HANDOVER.md for seamless LLM context sharing`
+  * `2277c82` - `fix(db): ensure connection destruction on failed search_path reset and update handover doc`
 * **Árbol de trabajo:** Completamente limpio (`git status` limpio).
 
 ---
