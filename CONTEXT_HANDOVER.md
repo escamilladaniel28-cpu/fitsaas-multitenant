@@ -2,7 +2,9 @@
 > **Documento de Contexto y Estado del Proyecto para LLMs (Claude, DeepSeek, ChatGPT, etc.)**
 > **Fecha de Actualización:** 2026-10-21  
 > **Workspace:** `/home/Coder/Documentos/mdescamilla`  
-> **Autor del Resumen:** Antigravity AI Assistant
+> **GitHub Repository:** `https://github.com/escamilladaniel28-cpu/fitsaas-multitenant`  
+> **Autor del Proyecto:** Milton Escamilla (`escamilladaniel28@gmail.com`)  
+> **Asistente AI:** Antigravity AI Assistant
 
 ---
 
