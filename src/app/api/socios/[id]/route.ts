@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { query } from '@/lib/db';
+import { z } from 'zod';
+
+const uuidSchema = z.string().uuid({ message: 'ID de socio debe ser un UUID válido' });
+
+const updateSocioSchema = z.object({
+  nombre: z.string().trim().min(1, 'El nombre no puede estar vacío').optional(),
+  documento: z.string().trim().min(1, 'El documento no puede estar vacío').optional(),
+  email: z.string().trim().email('Formato de correo electrónico inválido').optional().nullable(),
+  telefono: z.string().trim().optional().nullable(),
+  estado: z.enum(['activo', 'inactivo', 'suspendido']).optional(),
+  planId: z.string().uuid('El planId debe ser un UUID válido').optional().nullable(),
+});
 
 export async function GET(
   req: NextRequest,
@@ -12,6 +24,9 @@ export async function GET(
   }
 
   const { id } = await params;
+  if (!uuidSchema.safeParse(id).success) {
+    return NextResponse.json({ error: 'ID de socio inválido' }, { status: 400 });
+  }
 
   try {
     const rows = await query(
@@ -47,10 +62,37 @@ export async function PUT(
   }
 
   const { id } = await params;
+  if (!uuidSchema.safeParse(id).success) {
+    return NextResponse.json({ error: 'ID de socio inválido' }, { status: 400 });
+  }
 
   try {
-    const body = await req.json();
-    const { planId, nombre, documento, email, telefono, estado } = body;
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return NextResponse.json({ error: 'Cuerpo de solicitud requerido' }, { status: 400 });
+    }
+
+    const parsed = updateSocioSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'validation_error', details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { planId, nombre, documento, email, telefono, estado } = parsed.data;
+
+    // Si se envía planId, validar existencia en planes
+    if (planId) {
+      const planRows = await query(
+        `SELECT id FROM planes WHERE id = $1 LIMIT 1;`,
+        [planId],
+        session.tenantSchema
+      );
+      if (planRows.length === 0) {
+        return NextResponse.json({ error: 'El plan especificado no existe' }, { status: 400 });
+      }
+    }
 
     const rows = await query(
       `UPDATE socios
@@ -62,7 +104,7 @@ export async function PUT(
            estado = COALESCE($6, estado)
        WHERE id = $7
        RETURNING *;`,
-      [planId || null, nombre, documento, email, telefono, estado, id],
+      [planId !== undefined ? planId : null, nombre, documento, email, telefono, estado, id],
       session.tenantSchema
     );
 
@@ -90,6 +132,9 @@ export async function DELETE(
   }
 
   const { id } = await params;
+  if (!uuidSchema.safeParse(id).success) {
+    return NextResponse.json({ error: 'ID de socio inválido' }, { status: 400 });
+  }
 
   try {
     const rows = await query(
