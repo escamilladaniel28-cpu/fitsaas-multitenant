@@ -48,9 +48,14 @@ export async function POST(req: NextRequest) {
 
   const idempotencyKey = req.headers.get('idempotency-key');
 
-  return withIdempotency(idempotencyKey, '/api/asistencias', session.tenantId, async () => {
+  const body = await req.json().catch(() => null);
+  if (!body) {
+    return NextResponse.json({ error: 'Cuerpo de solicitud requerido' }, { status: 400 });
+  }
+
+  return withIdempotency(idempotencyKey, '/api/asistencias', session.tenantId, body, async () => {
     try {
-      const body = await req.json();
+
       const { socioId, tipoAcceso, observaciones } = body;
 
       if (!socioId) {

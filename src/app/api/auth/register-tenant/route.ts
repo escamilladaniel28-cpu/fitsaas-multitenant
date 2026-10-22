@@ -15,9 +15,14 @@ export async function POST(req: NextRequest) {
 
   const idempotencyKey = req.headers.get('idempotency-key');
 
-  return withIdempotency(idempotencyKey, '/api/auth/register-tenant', undefined, async () => {
+  const body = await req.json().catch(() => null);
+  if (!body) {
+    return NextResponse.json({ error: 'Cuerpo de solicitud requerido' }, { status: 400 });
+  }
+
+  return withIdempotency(idempotencyKey, '/api/auth/register-tenant', undefined, body, async () => {
     try {
-      const body = await req.json();
+
       const { tenantName, slug, adminName, email, password } = body;
 
       // Validation
