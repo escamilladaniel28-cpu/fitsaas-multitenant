@@ -29,7 +29,11 @@ export async function GET(
 
     return NextResponse.json({ socio: rows[0] });
   } catch (error: any) {
-    return NextResponse.json({ error: 'Error al buscar socio' }, { status: 500 });
+    console.error('[/api/socios/[id] GET]', error);
+    return NextResponse.json(
+      { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+      { status: 500 }
+    );
   }
 }
 
@@ -68,7 +72,11 @@ export async function PUT(
 
     return NextResponse.json({ success: true, socio: rows[0] });
   } catch (error: any) {
-    return NextResponse.json({ error: 'Error al actualizar socio' }, { status: 500 });
+    console.error('[/api/socios/[id] PUT]', error);
+    return NextResponse.json(
+      { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+      { status: 500 }
+    );
   }
 }
 
@@ -96,6 +104,10 @@ export async function DELETE(
 
     return NextResponse.json({ success: true, message: 'Socio eliminado' });
   } catch (error: any) {
-    return NextResponse.json({ error: 'Error al eliminar socio' }, { status: 500 });
+    console.error('[/api/socios/[id] DELETE]', error);
+    return NextResponse.json(
+      { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+      { status: 500 }
+    );
   }
 }

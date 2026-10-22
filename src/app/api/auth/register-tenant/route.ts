@@ -134,9 +134,9 @@ export async function POST(req: NextRequest) {
         { status: 201 }
       );
     } catch (error: any) {
-      console.error('Error al registrar tenant:', error);
+      console.error('[/api/auth/register-tenant]', error);
       return NextResponse.json(
-        { error: 'Error interno al aprovisionar el tenant', details: error.message },
+        { error: 'internal_error', message: 'Ha ocurrido un error interno' },
         { status: 500 }
       );
     }
