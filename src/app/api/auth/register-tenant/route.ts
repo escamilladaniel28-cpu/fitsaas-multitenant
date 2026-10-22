@@ -13,6 +13,9 @@ export async function POST(req: NextRequest) {
     return buildRateLimitResponse(rateLimit.limit, rateLimit.remaining, rateLimit.resetInSeconds);
   }
 
+  // Asegurar que las tablas globales existan ANTES de usar idempotencia
+  await initGlobalSchema();
+
   const idempotencyKey = req.headers.get('idempotency-key');
   const body = await req.json().catch(() => null);
   if (!body) {
@@ -53,9 +56,6 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-
-      // Asegurar existencia de tablas globales en public
-      await initGlobalSchema();
 
       // Chequeo rápido previo (evita hashear contraseña si ya existe)
       const existingTenant = await query(
