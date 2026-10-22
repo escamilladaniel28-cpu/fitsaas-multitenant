@@ -91,9 +91,9 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error: any) {
-    console.error('Error en login:', error);
+    console.error('[/api/auth/login]', error);
     return NextResponse.json(
-      { error: 'Error interno en el servidor', details: error.message },
+      { error: 'internal_error', message: 'Ha ocurrido un error interno' },
       { status: 500 }
     );
   }

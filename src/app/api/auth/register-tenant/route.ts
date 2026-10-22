@@ -1,20 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { initGlobalSchema, createTenantSchema } from '@/lib/tenants';
+import { initGlobalSchema, provisionTenantAtomic } from '@/lib/tenants';
 import { query } from '@/lib/db';
 import { hashPassword, signToken, setSessionCookie } from '@/lib/auth';
 import { withIdempotency } from '@/lib/idempotency';
 import { checkRateLimit, buildRateLimitResponse } from '@/lib/rate-limit';
 
 export async function POST(req: NextRequest) {
-  // Rate limiting for tenant registration (max 10 requests per minute per IP)
+  // Rate limiting (10 peticiones/min por IP)
   const ip = req.headers.get('x-forwarded-for') || '127.0.0.1';
   const rateLimit = checkRateLimit(`register-tenant:${ip}`, { limit: 10, windowMs: 60000 });
   if (!rateLimit.isAllowed) {
     return buildRateLimitResponse(rateLimit.limit, rateLimit.remaining, rateLimit.resetInSeconds);
   }
 
-  const idempotencyKey = req.headers.get('idempotency-key');
+  // Asegurar que las tablas globales existan ANTES de usar idempotencia
+  await initGlobalSchema();
 
+  const idempotencyKey = req.headers.get('idempotency-key');
   const body = await req.json().catch(() => null);
   if (!body) {
     return NextResponse.json({ error: 'Cuerpo de solicitud requerido' }, { status: 400 });
@@ -22,10 +24,9 @@ export async function POST(req: NextRequest) {
 
   return withIdempotency(idempotencyKey, '/api/auth/register-tenant', undefined, body, async () => {
     try {
-
       const { tenantName, slug, adminName, email, password } = body;
 
-      // Validation
+      // Validaciones básicas de entrada
       if (!tenantName || !slug || !adminName || !email || !password) {
         return NextResponse.json(
           { error: 'Todos los campos son obligatorios' },
@@ -41,10 +42,22 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Ensure global tables exist
-      await initGlobalSchema();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return NextResponse.json(
+          { error: 'El formato del correo electrónico es inválido' },
+          { status: 400 }
+        );
+      }
 
-      // Check if tenant slug already exists
+      if (password.length < 6) {
+        return NextResponse.json(
+          { error: 'La contraseña debe tener al menos 6 caracteres' },
+          { status: 400 }
+        );
+      }
+
+      // Chequeo rápido previo (evita hashear contraseña si ya existe)
       const existingTenant = await query(
         `SELECT id FROM public.tenants WHERE slug = $1 LIMIT 1;`,
         [cleanSlug]
@@ -56,7 +69,6 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Check if user email already exists
       const existingUser = await query(
         `SELECT id FROM public.users WHERE email = $1 LIMIT 1;`,
         [email.toLowerCase().trim()]
@@ -68,29 +80,19 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // 1. Create dedicated tenant PostgreSQL schema and tables
-      const schemaName = await createTenantSchema(cleanSlug, tenantName);
-
-      // 2. Insert tenant record into public.tenants
-      const tenantRows = await query<{ id: string; slug: string; name: string; schema_name: string }>(
-        `INSERT INTO public.tenants (name, slug, schema_name)
-         VALUES ($1, $2, $3)
-         RETURNING id, slug, name, schema_name;`,
-        [tenantName.trim(), cleanSlug, schemaName]
-      );
-      const tenant = tenantRows[0];
-
-      // 3. Create admin user in public.users
+      // Hasheo de contraseña antes de la transacción SQL
       const passwordHash = await hashPassword(password);
-      const userRows = await query<{ id: string; email: string; name: string; role: string }>(
-        `INSERT INTO public.users (tenant_id, email, password_hash, name, role)
-         VALUES ($1, $2, $3, $4, 'admin')
-         RETURNING id, email, name, role;`,
-        [tenant.id, email.toLowerCase().trim(), passwordHash, adminName.trim()]
-      );
-      const user = userRows[0];
 
-      // 4. Generate JWT & Set httpOnly cookie
+      // Ejecución atómica en una única transacción
+      const { tenant, user } = await provisionTenantAtomic({
+        tenantName,
+        slug: cleanSlug,
+        adminName,
+        email,
+        passwordHash,
+      });
+
+      // Emisión de JWT y cookie de sesión
       const token = signToken({
         userId: user.id,
         email: user.email,
@@ -99,12 +101,12 @@ export async function POST(req: NextRequest) {
         tenantId: tenant.id,
         tenantSlug: tenant.slug,
         tenantName: tenant.name,
-        tenantSchema: tenant.schema_name,
+        tenantSchema: tenant.schemaName,
       });
 
       await setSessionCookie(token);
 
-      // Trigger optional n8n webhook asynchronously
+      // Despacho asíncrono opcional de webhook n8n
       import('@/lib/webhooks').then(({ dispatchWebhook }) => {
         dispatchWebhook('tenant.created', {
           tenantId: tenant.id,
@@ -118,25 +120,21 @@ export async function POST(req: NextRequest) {
         {
           success: true,
           message: 'Gimnasio y schema aprovisionados con éxito',
-          tenant: {
-            id: tenant.id,
-            slug: tenant.slug,
-            name: tenant.name,
-            schemaName: tenant.schema_name,
-          },
-          user: {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            role: user.role,
-          },
+          tenant,
+          user,
         },
         { status: 201 }
       );
     } catch (error: any) {
-      console.error('Error al registrar tenant:', error);
+      // Regla 3: Si es 409 (violación de unicidad), responder 409 y no 500
+      if (error.statusCode === 409 || error.code === '23505') {
+        return NextResponse.json({ error: error.message }, { status: 409 });
+      }
+
+      // Errores internos reales protegidos (P1.3)
+      console.error('[/api/auth/register-tenant]', error);
       return NextResponse.json(
-        { error: 'Error interno al aprovisionar el tenant', details: error.message },
+        { error: 'internal_error', message: 'Ha ocurrido un error interno' },
         { status: 500 }
       );
     }

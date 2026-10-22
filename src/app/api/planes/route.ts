@@ -19,8 +19,11 @@ export async function GET() {
 
     return NextResponse.json({ planes });
   } catch (error: any) {
-    console.error('Error al obtener planes:', error);
-    return NextResponse.json({ error: 'Error al consultar planes' }, { status: 500 });
+    console.error('[/api/planes GET]', error);
+    return NextResponse.json(
+      { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+      { status: 500 }
+    );
   }
 }
 
@@ -51,7 +54,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, plan: rows[0] }, { status: 201 });
   } catch (error: any) {
-    console.error('Error al crear plan:', error);
-    return NextResponse.json({ error: 'Error al registrar el plan' }, { status: 500 });
+    console.error('[/api/planes POST]', error);
+    return NextResponse.json(
+      { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+      { status: 500 }
+    );
   }
 }

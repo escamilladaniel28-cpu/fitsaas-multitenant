@@ -63,7 +63,7 @@ graph TD
 * **Schema compartido (`public`):**
   * `tenants`: Registro global de gimnasios aprovisionados (`id`, `slug`, `name`, `schema_name`, `created_at`).
   * `users`: Cuentas de administradores asociadas a un tenant (`id`, `tenant_id`, `email`, `password_hash`, `role`).
-  * `idempotency_records`: Registro centralizado de peticiones idempotentes y sus respuestas en caché con TTL de 24 horas.
+  * `idempotency_records`: Registro centralizado de peticiones idempotentes y sus respuestas en caché con TTL de 24 horas scoped por `(tenant_id, endpoint, key)`.
 * **Schema exclusivo (`tenant_<slug>`):**
   * Creado dinámicamente mediante `CREATE SCHEMA IF NOT EXISTS "tenant_<slug>"` al momento del registro.
   * Tablas de negocio: `planes`, `socios`, `asistencias`.
@@ -103,7 +103,9 @@ La resolución se realiza de manera segura y transparente:
   * `POST /api/asistencias` (Validación de acceso en torniquete).
 * **Mecanismo:**
   * El cliente envía una clave única en el header `Idempotency-Key` (ej. UUID v4).
-  * Si la clave ya existe en `public.idempotency_records` y no ha expirado, el servidor devuelve la respuesta almacenada sin volver a ejecutar la transacción, agregando el header `X-Idempotent-Replay: true`.
+  * La clave se almacena scoped a `(tenant_id, endpoint, key)` con hash SHA-256 canónico (`stableStringify`).
+  * Si la clave ya existe y el payload coincide, devuelve la respuesta almacenada sin volver a ejecutar la transacción (`X-Idempotent-Replay: true`).
+  * Si la misma clave se reutiliza con un payload diferente, devuelve HTTP `422 Unprocessable Entity` (`idempotency_key_reused`).
   * **Persistencia y TTL:** Se conservan durante **24 horas** en la tabla global `idempotency_records`.
 
 ### 4.2 Rate Limiting (Obligatorio)
@@ -172,17 +174,18 @@ docker compose down
 
 ## 🧪 7. Pruebas Automatizadas
 
-El proyecto incluye una suite de pruebas para verificar el aislamiento entre tenants y la idempotencia:
+El proyecto incluye una suite completa de pruebas automatizadas que valida 4 escenarios críticos:
 
 ```bash
 npm test
 ```
 
-Esta prueba automatizada:
-1. Crea dos tenants independientes (`Tenant Alfa` y `Tenant Beta`).
-2. Inserta datos en el esquema del `Tenant Alfa`.
-3. Valida mediante consultas que el `Tenant Beta` tiene **0 registros** (aislamiento estricto).
-4. Envía dos peticiones con la misma `Idempotency-Key` y valida que el código se ejecuta exactamente una sola vez (`X-Idempotent-Replay: true`).
+Esta suite ejecuta:
+1. **Inicialización:** Garantiza la creación de tablas globales en `public`.
+2. **Aislamiento Multitenant Estricto:** Crea Tenant Alfa y Tenant Beta; comprueba que los socios insertados en Alfa no son visibles bajo ninguna circunstancia desde Beta (0 registros encontrados).
+3. **Idempotencia Scoped por Tenant:** Comprueba que Tenant A y Tenant B usando la misma clave de idempotencia (`testKey`) en `/api/socios` reciben sus propias respuestas sin colisión.
+4. **Replay Cacheado:** Comprueba que una segunda llamada con el mismo payload devuelva la respuesta cacheada sin re-ejecutar el handler (`X-Idempotent-Replay: true`).
+5. **Detección de Reutilización de Clave:** Comprueba que reutilizar la misma clave con un payload distinto retorne de inmediato HTTP `422 Unprocessable Entity` (`idempotency_key_reused`).
 
 ---
 
@@ -196,3 +199,34 @@ Esta prueba automatizada:
   * Módulo `src/lib/webhooks.ts` que despacha eventos (ej. `tenant.created`) hacia un webhook configurable mediante `N8N_WEBHOOK_URL`.
 * **Inspector para la Sustentación:**
   * Pestaña interactiva en el Dashboard para que el evaluador pueda disparar en vivo pruebas de idempotencia duplicada y saturación de rate limit (HTTP 429).
+
+---
+
+## 🌳 9. Estrategia de Ramas (Git Flow)
+
+El desarrollo del proyecto sigue un flujo riguroso de integración continua:
+* **`main`:** Rama protegida de producción. No admite commits directos; únicamente recibe Pull Requests aprobados que provienen de `develop`.
+* **`develop`:** Rama principal de integración y staging donde confluyen todas las funcionalidades completadas y testeadas.
+* **`feature/*`:** Ramas de trabajo efímeras creadas a partir de `develop` para aislar cada tarea (ej. `feature/p1.1-logout-endpoint`, `feature/p1.4-atomic-registration`, `feature/p1.2-zod-validation`).
+* **Regla Inquebrantable:** Cada Pull Request hacia `develop` o `main` debe superar obligatoriamente el pipeline de GitHub Actions CI (`npm run lint`, pruebas de aislamiento `npm test`, y `next build`).
+
+---
+
+## ⚖️ 10. Limitaciones Conocidas (Trade-offs de Diseño)
+
+Durante la auditoría y desarrollo se tomaron decisiones arquitectónicas con trade-offs conscientes:
+
+1. **Rate Limiting en Memoria (Sliding Window Log):**
+   * *Estado:* Implementado eficientemente en memoria Node.js para despliegues de instancia única.
+   * *Trade-off:* En un entorno multi-instancia horizontal (cluster), los contadores no se comparten entre réplicas. Para escalar horizontalmente se requeriría un almacén distribuido como Redis.
+2. **Idempotencia Secuencial vs Concurrente:**
+   * *Estado:* Protege de manera integral contra reintentos de red, reenvíos y caídas secuenciales mediante persistencia en `public.idempotency_records` con hash canónico SHA-256 (`stableStringify`) y detección de reutilización con payload diferente (HTTP 422).
+   * *Trade-off:* Si dos peticiones idénticas llegan en el microsegundo exacto en paralelo, ambas podrían superar el chequeo inicial antes de que la primera inserte en la tabla (carrera concurrente). Esto se documenta como limitación aceptada sin claim optimista `processing`.
+3. **Control Nativo con `pg` en lugar de un ORM (Prisma / Drizzle):**
+   * *Estado:* Uso deliberado del driver nativo `node-postgres` (`pg`).
+   * *Justificación:* Prisma y otros ORMs requieren pre-generar o instanciar clientes cacheados por cada esquema dinámico en runtime. `pg` permite ejecutar de forma determinista y sin sobrecosto de memoria comandos como `SET search_path` y `SET LOCAL search_path` por conexión.
+4. **Confianza de IP en `X-Forwarded-For`:**
+   * *Estado:* El limitador de tasa y registro extraen la IP del cliente de `x-forwarded-for`.
+   * *Supuesto Operativo:* En producción se asume la presencia de un Reverse Proxy confiable (Nginx, Traefik, Cloudflare) que sanitiza y reescribe las cabeceras `X-Forwarded-For` y `X-Real-IP`, previniendo spoofing.
+5. **Aprovisionamiento Atómico:**
+   * *Garantía:* Toda la creación del tenant (`CREATE SCHEMA`, `CREATE TABLEs`, inserción en `public.tenants` y `public.users`) se ejecuta en una única transacción con `SET LOCAL search_path`. Ante cualquier error, el `ROLLBACK` total garantiza cero schemas huérfanos.

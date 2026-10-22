@@ -3,6 +3,17 @@ import { getSession } from '@/lib/auth';
 import { query } from '@/lib/db';
 import { withIdempotency } from '@/lib/idempotency';
 import { checkRateLimit, buildRateLimitResponse } from '@/lib/rate-limit';
+import { z } from 'zod';
+
+const createSocioSchema = z.object({
+  nombre: z.string().trim().min(1, 'El nombre es obligatorio'),
+  documento: z.string().trim().min(1, 'El documento es obligatorio'),
+  email: z.string().trim().email('Formato de correo electrónico inválido').optional().nullable(),
+  telefono: z.string().trim().optional().nullable(),
+  fechaInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato de fecha debe ser YYYY-MM-DD').optional(),
+  estado: z.enum(['activo', 'inactivo', 'suspendido']).default('activo'),
+  planId: z.string().uuid('El planId debe ser un UUID válido').optional().nullable(),
+});
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -40,8 +51,11 @@ export async function GET(req: NextRequest) {
     const socios = await query(sql, params, session.tenantSchema);
     return NextResponse.json({ socios });
   } catch (error: any) {
-    console.error('Error al listar socios:', error);
-    return NextResponse.json({ error: 'Error al consultar socios' }, { status: 500 });
+    console.error('[/api/socios GET]', error);
+    return NextResponse.json(
+      { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+      { status: 500 }
+    );
   }
 }
 
@@ -69,20 +83,32 @@ export async function POST(req: NextRequest) {
 
   return withIdempotency(idempotencyKey, '/api/socios', session.tenantId, body, async () => {
     try {
-
-      const { planId, nombre, documento, email, telefono, fechaInicio, estado } = body;
-
-      if (!nombre || !documento) {
+      const parsed = createSocioSchema.safeParse(body);
+      if (!parsed.success) {
         return NextResponse.json(
-          { error: 'Nombre y documento son obligatorios' },
+          { error: 'validation_error', details: parsed.error.flatten() },
           { status: 400 }
         );
+      }
+
+      const { planId, nombre, documento, email, telefono, fechaInicio, estado } = parsed.data;
+
+      // Validar existencia de planId si fue provisto
+      if (planId) {
+        const planRows = await query(
+          `SELECT id FROM planes WHERE id = $1 LIMIT 1;`,
+          [planId],
+          session.tenantSchema
+        );
+        if (planRows.length === 0) {
+          return NextResponse.json({ error: 'El plan especificado no existe' }, { status: 400 });
+        }
       }
 
       // Check if document already exists in this tenant
       const existing = await query(
         `SELECT id FROM socios WHERE documento = $1 LIMIT 1;`,
-        [documento.trim()],
+        [documento],
         session.tenantSchema
       );
       if (existing.length > 0) {
@@ -98,12 +124,12 @@ export async function POST(req: NextRequest) {
          RETURNING id, plan_id, nombre, documento, email, telefono, fecha_inicio, estado, created_at;`,
         [
           planId || null,
-          nombre.trim(),
-          documento.trim(),
-          email ? email.trim() : null,
-          telefono ? telefono.trim() : null,
+          nombre,
+          documento,
+          email || null,
+          telefono || null,
           fechaInicio || new Date().toISOString().split('T')[0],
-          estado || 'activo',
+          estado,
         ],
         session.tenantSchema
       );
@@ -113,8 +139,11 @@ export async function POST(req: NextRequest) {
         { status: 201 }
       );
     } catch (error: any) {
-      console.error('Error al crear socio:', error);
-      return NextResponse.json({ error: 'Error al registrar socio' }, { status: 500 });
+      console.error('[/api/socios POST]', error);
+      return NextResponse.json(
+        { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+        { status: 500 }
+      );
     }
   });
 }

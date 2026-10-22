@@ -3,6 +3,13 @@ import { getSession } from '@/lib/auth';
 import { query } from '@/lib/db';
 import { withIdempotency } from '@/lib/idempotency';
 import { checkRateLimit, buildRateLimitResponse } from '@/lib/rate-limit';
+import { z } from 'zod';
+
+const createAsistenciaSchema = z.object({
+  socioId: z.string().uuid('El ID del socio debe ser un UUID válido'),
+  tipoAcceso: z.enum(['entrada', 'salida']).default('entrada'),
+  observaciones: z.string().max(500, 'Las observaciones no pueden exceder 500 caracteres').optional(),
+});
 
 export async function GET() {
   const session = await getSession();
@@ -26,8 +33,11 @@ export async function GET() {
 
     return NextResponse.json({ asistencias });
   } catch (error: any) {
-    console.error('Error al consultar asistencias:', error);
-    return NextResponse.json({ error: 'Error al consultar asistencias' }, { status: 500 });
+    console.error('[/api/asistencias GET]', error);
+    return NextResponse.json(
+      { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+      { status: 500 }
+    );
   }
 }
 
@@ -55,15 +65,15 @@ export async function POST(req: NextRequest) {
 
   return withIdempotency(idempotencyKey, '/api/asistencias', session.tenantId, body, async () => {
     try {
-
-      const { socioId, tipoAcceso, observaciones } = body;
-
-      if (!socioId) {
+      const parsed = createAsistenciaSchema.safeParse(body);
+      if (!parsed.success) {
         return NextResponse.json(
-          { error: 'El ID del socio es obligatorio' },
+          { error: 'validation_error', details: parsed.error.flatten() },
           { status: 400 }
         );
       }
+
+      const { socioId, tipoAcceso, observaciones } = parsed.data;
 
       // Verify socio exists and check status
       const socioRows = await query<{ id: string; nombre: string; estado: string }>(
@@ -91,7 +101,7 @@ export async function POST(req: NextRequest) {
         `INSERT INTO asistencias (socio_id, tipo_acceso, observaciones)
          VALUES ($1, $2, $3)
          RETURNING id, socio_id, fecha_hora, tipo_acceso, observaciones;`,
-        [socioId, tipoAcceso || 'entrada', observaciones || 'Acceso regular registrado'],
+        [socioId, tipoAcceso, observaciones || 'Acceso regular registrado'],
         session.tenantSchema
       );
 
@@ -105,8 +115,11 @@ export async function POST(req: NextRequest) {
         { status: 201 }
       );
     } catch (error: any) {
-      console.error('Error al registrar asistencia:', error);
-      return NextResponse.json({ error: 'Error al registrar asistencia' }, { status: 500 });
+      console.error('[/api/asistencias POST]', error);
+      return NextResponse.json(
+        { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+        { status: 500 }
+      );
     }
   });
 }
