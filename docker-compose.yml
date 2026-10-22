@@ -30,7 +30,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/${DB_NAME:-fitsaas_db}
-      JWT_SECRET: ${JWT_SECRET:-super-secret-fitsaas-token-key-2026}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - copy .env.example to .env}
       PORT: 3001
       NODE_ENV: production
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}

@@ -45,6 +45,7 @@ jobs:
       - name: Run Automated Isolation & Idempotency Tests
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5436/fitsaas_db
+          JWT_SECRET: ci-test-secret-key-12345
         run: npm test
 
       - name: Run Next.js Build

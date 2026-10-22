@@ -2,7 +2,10 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-fitsaas-token-key-2026';
+if (!process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET is required');
+}
+const JWT_SECRET = process.env.JWT_SECRET;
 const COOKIE_NAME = 'fit_session';
 
 export interface TokenPayload {
