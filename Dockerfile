@@ -11,6 +11,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+ARG JWT_SECRET=dummy-build-time-secret-not-used-at-runtime
+ENV JWT_SECRET=${JWT_SECRET}
 RUN npm run build
 
 # Stage 3: Runner
