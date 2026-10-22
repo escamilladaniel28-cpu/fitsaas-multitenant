@@ -26,8 +26,11 @@ export async function GET() {
 
     return NextResponse.json({ asistencias });
   } catch (error: any) {
-    console.error('Error al consultar asistencias:', error);
-    return NextResponse.json({ error: 'Error al consultar asistencias' }, { status: 500 });
+    console.error('[/api/asistencias GET]', error);
+    return NextResponse.json(
+      { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+      { status: 500 }
+    );
   }
 }
 
@@ -105,8 +108,11 @@ export async function POST(req: NextRequest) {
         { status: 201 }
       );
     } catch (error: any) {
-      console.error('Error al registrar asistencia:', error);
-      return NextResponse.json({ error: 'Error al registrar asistencia' }, { status: 500 });
+      console.error('[/api/asistencias POST]', error);
+      return NextResponse.json(
+        { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+        { status: 500 }
+      );
     }
   });
 }

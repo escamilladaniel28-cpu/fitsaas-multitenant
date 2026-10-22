@@ -22,9 +22,9 @@ export async function GET() {
     const result = await generateGymInsights(session.tenantSchema, session.tenantName);
     return NextResponse.json(result);
   } catch (error: any) {
-    console.error('Error en AI analytics route:', error);
+    console.error('[/api/ai/analytics]', error);
     return NextResponse.json(
-      { error: 'Error al generar análisis con IA', details: error.message },
+      { error: 'internal_error', message: 'Ha ocurrido un error interno' },
       { status: 500 }
     );
   }

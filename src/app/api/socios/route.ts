@@ -40,8 +40,11 @@ export async function GET(req: NextRequest) {
     const socios = await query(sql, params, session.tenantSchema);
     return NextResponse.json({ socios });
   } catch (error: any) {
-    console.error('Error al listar socios:', error);
-    return NextResponse.json({ error: 'Error al consultar socios' }, { status: 500 });
+    console.error('[/api/socios GET]', error);
+    return NextResponse.json(
+      { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+      { status: 500 }
+    );
   }
 }
 
@@ -113,8 +116,11 @@ export async function POST(req: NextRequest) {
         { status: 201 }
       );
     } catch (error: any) {
-      console.error('Error al crear socio:', error);
-      return NextResponse.json({ error: 'Error al registrar socio' }, { status: 500 });
+      console.error('[/api/socios POST]', error);
+      return NextResponse.json(
+        { error: 'internal_error', message: 'Ha ocurrido un error interno' },
+        { status: 500 }
+      );
     }
   });
 }
