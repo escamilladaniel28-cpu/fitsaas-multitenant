@@ -22,8 +22,20 @@ async function runTests() {
     const schemaA = await createTenantSchema(slugA, 'Gym Alfa');
     const schemaB = await createTenantSchema(slugB, 'Gym Beta');
 
-    console.log(`  ✓ Tenant A creado: Schema "${schemaA}"`);
-    console.log(`  ✓ Tenant B creado: Schema "${schemaB}"\n`);
+    // Registrar tenants en public.tenants para obtener sus UUIDs reales
+    const tenantRowA = await query<{ id: string }>(
+      `INSERT INTO public.tenants (name, slug, schema_name) VALUES ('Gym Alfa', $1, $2) RETURNING id;`,
+      [slugA, schemaA]
+    );
+    const tenantRowB = await query<{ id: string }>(
+      `INSERT INTO public.tenants (name, slug, schema_name) VALUES ('Gym Beta', $1, $2) RETURNING id;`,
+      [slugB, schemaB]
+    );
+    const tenantIdA = tenantRowA[0].id;
+    const tenantIdB = tenantRowB[0].id;
+
+    console.log(`  ✓ Tenant A creado: ID "${tenantIdA}", Schema "${schemaA}"`);
+    console.log(`  ✓ Tenant B creado: ID "${tenantIdB}", Schema "${schemaB}"\n`);
 
     // 3. Insert member in Tenant A
     console.log('[3/4] Insertando un socio exclusivamente en Tenant A...');
@@ -56,36 +68,51 @@ async function runTests() {
     }
     console.log('  ✓ AISLAMIENTO VERIFICADO: Tenant B tiene 0 registros del socio de Tenant A.\n');
 
-    // 4. Test Idempotency
-    console.log('[4/4] Probando idempotencia con Idempotency-Key...');
+    // 4. Test Idempotency & Cross-Tenant Scoping (P0.2)
+    console.log('[4/4] Probando idempotencia y aislamiento cross-tenant de Idempotency-Key...');
     const testKey = `test-key-${Date.now()}`;
-    let executionCounter = 0;
+    const dummyPayloadA = { socio: 'Alfa', plan: 'Gold' };
+    const dummyPayloadB = { socio: 'Beta', plan: 'Silver' };
+    const dummyPayloadA_Modified = { socio: 'Alfa Modificado', plan: 'Gold' };
 
-    const dummyHandler = async () => {
-      executionCounter++;
-      return NextResponse.json({ counter: executionCounter, message: 'Operación ejecutada' }, { status: 201 });
-    };
+    // 4.1 Tenant A con testKey
+    const resA = await withIdempotency(testKey, '/api/socios', tenantIdA, dummyPayloadA, async () => {
+      return NextResponse.json({ tenant: 'Alfa', created: true }, { status: 201 });
+    });
+    const bodyA = await resA.json();
 
-    // First call
-    const res1 = await withIdempotency(testKey, '/api/test', undefined, dummyHandler);
-    const body1 = await res1.json();
+    // 4.2 Tenant B con la MISMA testKey (Prueba de fuga cross-tenant)
+    const resB = await withIdempotency(testKey, '/api/socios', tenantIdB, dummyPayloadB, async () => {
+      return NextResponse.json({ tenant: 'Beta', created: true }, { status: 201 });
+    });
+    const bodyB = await resB.json();
 
-    // Second call with the EXACT SAME KEY
-    const res2 = await withIdempotency(testKey, '/api/test', undefined, dummyHandler);
-    const body2 = await res2.json();
-    const replayHeader = res2.headers.get('X-Idempotent-Replay');
-
-    if (executionCounter !== 1) {
-      throw new Error(`Fallo de idempotencia: el handler se ejecutó ${executionCounter} veces en lugar de 1.`);
+    if (bodyA.tenant !== 'Alfa' || bodyB.tenant !== 'Beta') {
+      throw new Error('CRÍTICO: Fuga de idempotencia detectada. Tenant B recibió la respuesta de Tenant A.');
     }
+    console.log('  ✓ AISLAMIENTO DE IDEMPOTENCIA VERIFICADO: Tenant A y Tenant B tienen respuestas independientes con la misma key.');
 
-    if (replayHeader !== 'true' || body1.counter !== body2.counter) {
-      throw new Error('Fallo de idempotencia: la respuesta no fue rejugada desde el caché.');
+    // 4.3 Tenant A repite la petición con el mismo payload (Replay en caché)
+    const resAReplay = await withIdempotency(testKey, '/api/socios', tenantIdA, dummyPayloadA, async () => {
+      throw new Error('Fallo: No debió ejecutarse el handler en un replay idempotente');
+    });
+    if (resAReplay.headers.get('X-Idempotent-Replay') !== 'true') {
+      throw new Error('Fallo: No se encontró el header X-Idempotent-Replay: true.');
     }
+    console.log('  ✓ REPLAY VERIFICADO: Se rejugó la respuesta en caché para Tenant A (X-Idempotent-Replay: true).');
 
-    console.log(`  ✓ Primera llamada: counter = ${body1.counter}`);
-    console.log(`  ✓ Segunda llamada: counter = ${body2.counter} (X-Idempotent-Replay: ${replayHeader})`);
-    console.log('  ✓ IDEMPOTENCIA VERIFICADA: La lógica se ejecutó exactamente 1 vez.\n');
+    // 4.4 Tenant A reutiliza la key con diferente payload -> HTTP 422 idempotency_key_reused
+    const resAConflict = await withIdempotency(testKey, '/api/socios', tenantIdA, dummyPayloadA_Modified, async () => {
+      return NextResponse.json({ ok: true }, { status: 201 });
+    });
+    if (resAConflict.status !== 422) {
+      throw new Error(`Fallo: Se esperaba HTTP 422 por reutilización de key con payload diferente, se obtuvo ${resAConflict.status}`);
+    }
+    const conflictBody = await resAConflict.json();
+    if (conflictBody.error !== 'idempotency_key_reused') {
+      throw new Error(`Fallo: Se esperaba error "idempotency_key_reused", se obtuvo "${conflictBody.error}"`);
+    }
+    console.log('  ✓ DETECCIÓN DE REUTILIZACIÓN VERIFICADA: HTTP 422 idempotency_key_reused al cambiar payload.\n');
 
     console.log('=============================================');
     console.log('🎉 TODAS LAS PRUEBAS AUTOMATIZADAS PASARON CON ÉXITO');

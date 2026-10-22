@@ -45,13 +45,16 @@ export async function initGlobalSchema() {
       );
 
       CREATE TABLE IF NOT EXISTS public.idempotency_records (
-        key VARCHAR(255) PRIMARY KEY,
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        key VARCHAR(255) NOT NULL,
         tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
         endpoint VARCHAR(255) NOT NULL,
+        request_hash VARCHAR(64),
         status_code INT NOT NULL,
         response_body JSONB NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        CONSTRAINT uq_idempotency_tenant_endpoint_key UNIQUE NULLS NOT DISTINCT (tenant_id, endpoint, key)
       );
 
       CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
