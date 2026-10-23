@@ -17,10 +17,17 @@ const items: { label: string; key: TabKey; icon: any }[] = [
 export function FloatingSidebar({
   activeTab,
   onTabChange,
+  userRole,
 }: {
   activeTab: TabKey
   onTabChange: (tab: TabKey) => void
+  userRole?: string
 }) {
+  const visibleItems =
+    userRole === 'empleado'
+      ? items.filter((i) => ['resumen', 'socios', 'asistencias', 'clases'].includes(i.key))
+      : items
+
   return (
     <nav
       aria-label="Principal"
@@ -35,7 +42,7 @@ export function FloatingSidebar({
         <span className="sr-only">FitSaaS Core</span>
       </div>
 
-      {items.map(({ label, key, icon: Icon }) => {
+      {visibleItems.map(({ label, key, icon: Icon }) => {
         const isActive = activeTab === key
         return (
           <button

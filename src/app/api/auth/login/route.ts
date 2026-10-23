@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       email: user.email,
       name: user.name,
-      role: user.role,
+      role: user.role || 'admin',
       tenantId: user.tenant_id,
       tenantSlug: user.tenant_slug,
       tenantName: user.tenant_name,
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role,
+        role: user.role || 'admin',
       },
     });
   } catch (error: any) {
