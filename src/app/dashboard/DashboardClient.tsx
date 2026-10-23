@@ -26,6 +26,7 @@ import { CheckInsTable, type CheckInItem } from '@/components/kinetic/checkins-t
 import { QuickActionsCard } from '@/components/kinetic/quick-actions-card';
 import { NewMemberDialog } from '@/components/dashboard/new-member-dialog';
 import { BentoCard, CardEyebrow } from '@/components/kinetic/bento-card';
+import { ClassesView } from '@/components/kinetic/classes-view';
 
 interface SessionInfo {
   userId: string;
@@ -655,6 +656,16 @@ export default function DashboardClient({
                 className="lg:col-span-7"
               />
             </div>
+          )}
+
+          {/* TAB: CLASES & RESERVAS */}
+          {activeTab === 'clases' && (
+            <ClassesView
+              tenantSchema={session.tenantSchema}
+              onCheckinSuccess={() => {
+                fetchAsistencias();
+              }}
+            />
           )}
 
           {/* TAB: PLANES */}
