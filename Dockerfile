@@ -20,7 +20,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=3001
+ENV PORT=3000
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
@@ -32,6 +32,6 @@ COPY --from=builder /app/package.json ./package.json
 
 USER nextjs
 
-EXPOSE 3001
+EXPOSE 3000
 
-CMD ["npm", "start", "--", "-p", "3001"]
+CMD ["npm", "start", "--", "-p", "3000"]

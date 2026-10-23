@@ -230,3 +230,50 @@ Durante la auditoría y desarrollo se tomaron decisiones arquitectónicas con tr
    * *Supuesto Operativo:* En producción se asume la presencia de un Reverse Proxy confiable (Nginx, Traefik, Cloudflare) que sanitiza y reescribe las cabeceras `X-Forwarded-For` y `X-Real-IP`, previniendo spoofing.
 5. **Aprovisionamiento Atómico:**
    * *Garantía:* Toda la creación del tenant (`CREATE SCHEMA`, `CREATE TABLEs`, inserción en `public.tenants` y `public.users`) se ejecuta en una única transacción con `SET LOCAL search_path`. Ante cualquier error, el `ROLLBACK` total garantiza cero schemas huérfanos.
+
+---
+
+## 🚀 11. Despliegue en VPS (Producción con Docker & Nginx)
+
+La arquitectura de producción está contenerizada y orquestada para garantizar alta disponibilidad y seguridad:
+
+* **PostgreSQL:** Corre en una red interna de Docker (`fitsaas_prod_network`) **sin exponer el puerto 5432 al exterior**, evitando ataques de fuerza bruta directos a la base de datos.
+* **Next.js:** Empaquetado en un contenedor optimizado en modo `NODE_ENV=production` con reinicio automático (`restart: unless-stopped`).
+* **Nginx:** Actúa como Proxy Inverso en los puertos 80 (HTTP) y 443 (HTTPS), gestionando la terminación del tráfico, cabeceras `X-Forwarded-*` y reenviando al puerto 3000 de la app.
+
+### Pasos para desplegar en tu servidor VPS (Ubuntu / Debian / AlmaLinux):
+
+1. **Clonar el repositorio en la VPS:**
+   ```bash
+   git clone https://github.com/escamilladaniel28-cpu/fitsaas-multitenant.git
+   cd fitsaas-multitenant
+   ```
+
+2. **Crear el archivo de variables de entorno de producción:**
+   ```bash
+   cp .env.production.example .env.production
+   nano .env.production
+   ```
+   *Genera contraseñas fuertes para `POSTGRES_PASSWORD` y un secreto criptográfico para `JWT_SECRET` (puedes crearlo con `openssl rand -base64 32`).*
+
+3. **Construir y levantar los contenedores:**
+   ```bash
+   docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+   ```
+
+4. **Verificar el estado y los logs del servicio:**
+   ```bash
+   # Comprobar contenedores activos y saludables
+   docker compose -f docker-compose.prod.yml ps
+
+   # Ver logs en tiempo real
+   docker compose -f docker-compose.prod.yml logs -f web
+   docker compose -f docker-compose.prod.yml logs -f nginx
+   ```
+
+5. **(Opcional) Configurar Certificado SSL Gratuito con Certbot:**
+   Para habilitar HTTPS en el puerto 443 con Let's Encrypt:
+   ```bash
+   sudo certbot --nginx -d tu-dominio.com
+   ```
+

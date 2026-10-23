@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fitsaas_prod_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es requerido}
+      POSTGRES_DB: ${POSTGRES_DB:-fitsaas_prod_db}
+    # SEGURIDAD: No se expone el puerto al host/exterior.
+    # PostgreSQL únicamente es accesible dentro de la red interna de Docker.
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-fitsaas_prod_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fitsaas_prod_network
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fitsaas_prod_web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fitsaas_prod_db}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET es requerido}
+      PORT: 3000
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-flash}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+    expose:
+      - "3000"
+    networks:
+      - fitsaas_prod_network
+
+  nginx:
+    image: nginx:alpine
+    container_name: fitsaas_prod_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - web
+    networks:
+      - fitsaas_prod_network
+
+volumes:
+  postgres_prod_data:
+    name: fitsaas_prod_pgdata
+
+networks:
+  fitsaas_prod_network:
+    name: fitsaas_prod_network
+    driver: bridge
