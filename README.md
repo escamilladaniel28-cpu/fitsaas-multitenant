@@ -277,3 +277,31 @@ La arquitectura de producción está contenerizada y orquestada para garantizar 
    sudo certbot --nginx -d tu-dominio.com
    ```
 
+
+---
+
+## 📅 12. Módulo de Clases y Reservas con PIN (Check-in Atómico)
+
+El módulo de clases expande el dominio operativo permitiendo a los gimnasios programar clases grupales, controlar aforos y registrar accesos mediante un PIN de 6 dígitos:
+
+* **Tablas Dedicadas en cada Schema:**
+  * `clases`: Identificador UUID, nombre, instructor, horario (`TIMESTAMP WITH TIME ZONE`) y cupos_totales.
+  * `reservas`: Asociación de un socio activo a una clase, estado del ciclo de vida (`pendiente` / `asistio`) y `codigo_pin` aleatorio de 6 dígitos (`100000` a `999999`).
+* **Check-in Atómico con Bloqueo de Fila (`FOR UPDATE`):**
+  * Al ingresar el PIN en `/api/reservas/checkin`, la consulta se ejecuta con `SELECT ... FOR UPDATE OF r`, previniendo condiciones de carrera si dos recepcionistas o torniquetes intentan validar el mismo PIN en paralelo.
+  * Si la reserva ya fue consumida (`estado = 'asistio'`), se rechaza de inmediato con HTTP `409 Conflict`.
+  * En una única transacción atómica (`withTenantTransaction`), se actualiza la reserva a `'asistio'` y se registra simultáneamente la entrada en la tabla `asistencias` (`INSERT INTO asistencias`), impactando el aforo en vivo del dashboard al instante.
+
+---
+
+## 🛡️ 13. Control de Acceso Basado en Roles (RBAC)
+
+El sistema soporta segregación de funciones entre **Administradores** y **Empleados**:
+
+* **Roles en Base de Datos y JWT:**
+  * Almacenados en la tabla global `public.users` (`role VARCHAR(30) DEFAULT 'admin'`).
+  * Incluidos de forma segura en la cookie de sesión `fit_session` (`httpOnly`).
+* **Reglas para el Rol `empleado`:**
+  * **Barra de Navegación Lateral (`FloatingSidebar`):** Se filtran las pestañas para mostrar únicamente las operaciones del día a día: **Resumen**, **Socios**, **Asistencias** y **Clases**. La pestaña de **Planes** queda completamente oculta.
+  * **Seguridad Financiera en Dashboard:** La tarjeta de **Ingresos por Membresías (`RevenueCard`)** en la vista de Resumen no se muestra para usuarios con rol `empleado`.
+  * **Protección contra Acceso Directo:** Si un empleado intenta acceder a la gestión de planes, la interfaz bloquea las acciones y despliega una tarjeta de *Acceso Restringido*.
