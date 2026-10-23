@@ -106,7 +106,7 @@ export async function createTenantSchema(slug: string, tenantName?: string): Pro
     // 2. Set search path to tenant schema for table creation with SET LOCAL
     await client.query(`SET LOCAL search_path TO "${schemaName}", public;`);
 
-    // 3. Create domain tables: planes, socios, asistencias
+    // 3. Create domain tables: planes, socios, asistencias, clases, reservas
     await client.query(`
       CREATE TABLE IF NOT EXISTS "${schemaName}".planes (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -138,8 +138,30 @@ export async function createTenantSchema(slug: string, tenantName?: string): Pro
         observaciones TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS "${schemaName}".clases (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        nombre VARCHAR(100) NOT NULL,
+        instructor VARCHAR(100) NOT NULL,
+        horario TIMESTAMP WITH TIME ZONE NOT NULL,
+        cupos_totales INT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS "${schemaName}".reservas (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        clase_id UUID NOT NULL REFERENCES "${schemaName}".clases(id) ON DELETE CASCADE,
+        socio_id UUID NOT NULL REFERENCES "${schemaName}".socios(id) ON DELETE CASCADE,
+        estado VARCHAR(20) NOT NULL DEFAULT 'pendiente', -- 'pendiente', 'asistio'
+        codigo_pin VARCHAR(6) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
       CREATE INDEX IF NOT EXISTS idx_socios_documento ON "${schemaName}".socios(documento);
       CREATE INDEX IF NOT EXISTS idx_asistencias_socio ON "${schemaName}".asistencias(socio_id);
+      CREATE INDEX IF NOT EXISTS idx_clases_horario ON "${schemaName}".clases(horario);
+      CREATE INDEX IF NOT EXISTS idx_reservas_pin ON "${schemaName}".reservas(codigo_pin);
+      CREATE INDEX IF NOT EXISTS idx_reservas_clase ON "${schemaName}".reservas(clase_id);
+      CREATE INDEX IF NOT EXISTS idx_reservas_socio ON "${schemaName}".reservas(socio_id);
     `);
 
     // 4. Insert default starter planes for the gym
@@ -213,8 +235,30 @@ export async function provisionTenantAtomic(params: ProvisionTenantParams): Prom
         observaciones TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS "${schemaName}".clases (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        nombre VARCHAR(100) NOT NULL,
+        instructor VARCHAR(100) NOT NULL,
+        horario TIMESTAMP WITH TIME ZONE NOT NULL,
+        cupos_totales INT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS "${schemaName}".reservas (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        clase_id UUID NOT NULL REFERENCES "${schemaName}".clases(id) ON DELETE CASCADE,
+        socio_id UUID NOT NULL REFERENCES "${schemaName}".socios(id) ON DELETE CASCADE,
+        estado VARCHAR(20) NOT NULL DEFAULT 'pendiente', -- 'pendiente', 'asistio'
+        codigo_pin VARCHAR(6) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
       CREATE INDEX IF NOT EXISTS idx_socios_documento ON "${schemaName}".socios(documento);
       CREATE INDEX IF NOT EXISTS idx_asistencias_socio ON "${schemaName}".asistencias(socio_id);
+      CREATE INDEX IF NOT EXISTS idx_clases_horario ON "${schemaName}".clases(horario);
+      CREATE INDEX IF NOT EXISTS idx_reservas_pin ON "${schemaName}".reservas(codigo_pin);
+      CREATE INDEX IF NOT EXISTS idx_reservas_clase ON "${schemaName}".reservas(clase_id);
+      CREATE INDEX IF NOT EXISTS idx_reservas_socio ON "${schemaName}".reservas(socio_id);
     `);
 
     // 3. Insertar planes iniciales con ON CONFLICT real
@@ -260,7 +304,7 @@ export async function provisionTenantAtomic(params: ProvisionTenantParams): Prom
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role,
+        role: user.role || 'admin',
       },
     };
   } catch (error: any) {
