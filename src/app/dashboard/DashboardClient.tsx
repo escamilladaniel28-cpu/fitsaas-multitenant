@@ -2,14 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { v4 as uuidv4 } from 'uuid';
 import {
-  Dumbbell,
-  Users,
-  CreditCard,
   UserCheck,
   Sparkles,
   Shield,
-  LogOut,
   Plus,
   Search,
   CheckCircle2,
@@ -19,7 +16,16 @@ import {
   Loader2,
   Play,
 } from 'lucide-react';
-import { v4 as uuidv4 } from 'uuid';
+
+import { FloatingSidebar, type TabKey } from '@/components/kinetic/floating-sidebar';
+import { TopBar } from '@/components/kinetic/top-bar';
+import { ActiveMembersCard } from '@/components/kinetic/active-members-card';
+import { LiveCapacityCard } from '@/components/kinetic/live-capacity-card';
+import { RevenueCard } from '@/components/kinetic/revenue-card';
+import { CheckInsTable, type CheckInItem } from '@/components/kinetic/checkins-table';
+import { QuickActionsCard } from '@/components/kinetic/quick-actions-card';
+import { NewMemberDialog } from '@/components/dashboard/new-member-dialog';
+import { BentoCard, CardEyebrow } from '@/components/kinetic/bento-card';
 
 interface SessionInfo {
   userId: string;
@@ -47,7 +53,7 @@ export default function DashboardClient({
   initialStats: StatsInfo;
 }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'resumen' | 'socios' | 'asistencias' | 'planes' | 'inspector'>('resumen');
+  const [activeTab, setActiveTab] = useState<TabKey>('resumen');
   const [stats, setStats] = useState<StatsInfo>(initialStats);
 
   // Socios state
@@ -55,14 +61,6 @@ export default function DashboardClient({
   const [searchTerm, setSearchTerm] = useState('');
   const [loadingSocios, setLoadingSocios] = useState(false);
   const [showSocioModal, setShowSocioModal] = useState(false);
-  const [socioForm, setSocioForm] = useState({
-    nombre: '',
-    documento: '',
-    email: '',
-    telefono: '',
-    planId: '',
-    estado: 'activo',
-  });
   const [savingSocio, setSavingSocio] = useState(false);
   const [socioFeedback, setSocioFeedback] = useState<string | null>(null);
 
@@ -88,7 +86,7 @@ export default function DashboardClient({
   const [aiData, setAiData] = useState<{ insights: string; source: string; modelUsed: string } | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
 
-  // Inspector & Live Testing state (Para la sustentación)
+  // Inspector & Live Testing state
   const [testLog, setTestLog] = useState<string[]>([]);
   const [testingIdempotency, setTestingIdempotency] = useState(false);
   const [testingRateLimit, setTestingRateLimit] = useState(false);
@@ -111,7 +109,6 @@ export default function DashboardClient({
       const data = await res.json();
       if (res.ok) {
         setSocios(data.socios || []);
-        // update stats
         const activeCount = (data.socios || []).filter((s: any) => s.estado === 'activo').length;
         setStats((prev) => ({
           ...prev,
@@ -155,8 +152,14 @@ export default function DashboardClient({
   };
 
   // Crear socio con Idempotency-Key
-  const handleSaveSocio = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveSocio = async (formData: {
+    nombre: string;
+    documento: string;
+    email: string;
+    telefono: string;
+    planId: string;
+    estado: string;
+  }) => {
     setSavingSocio(true);
     setSocioFeedback(null);
 
@@ -168,22 +171,14 @@ export default function DashboardClient({
           'Content-Type': 'application/json',
           'Idempotency-Key': idempotencyKey,
         },
-        body: JSON.stringify(socioForm),
+        body: JSON.stringify(formData),
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al guardar socio');
+      if (!res.ok) throw new Error(data.error || 'Error al registrar socio');
 
       setShowSocioModal(false);
-      setSocioForm({
-        nombre: '',
-        documento: '',
-        email: '',
-        telefono: '',
-        planId: '',
-        estado: 'activo',
-      });
-      fetchSocios();
+      await fetchSocios();
     } catch (err: any) {
       setSocioFeedback(err.message);
     } finally {
@@ -334,691 +329,545 @@ export default function DashboardClient({
     setTestingRateLimit(false);
   };
 
+  // Métrica calculada de ingresos estimados
+  const totalIngresosEstimados = socios.reduce((acc, s) => {
+    const plan = planes.find((p) => p.nombre === s.plan_nombre || p.id === s.plan_id);
+    return acc + (plan ? Number(plan.precio) : 0);
+  }, 0);
+
+  // Transformar asistencias para la tabla de v0
+  const checkInsItems: CheckInItem[] = asistencias.slice(0, 8).map((a, i) => ({
+    id: a.id,
+    name: a.socio_nombre || 'Socio Registrado',
+    documento: a.socio_documento,
+    plan: a.plan_nombre || 'General',
+    time: new Date(a.fecha_hora).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }),
+    status: 'in',
+    tone: (['volt', 'plasma', 'neutral'] as const)[i % 3],
+  }));
+
+  // Saludo dinámico en español
+  const currentHour = new Date().getHours();
+  const saludo = currentHour < 12 ? 'Buenos días' : currentHour < 19 ? 'Buenas tardes' : 'Buenas noches';
+  const primerNombre = session.name.split(' ')[0] || 'Administrador';
+
+  const fechaHoy = new Date().toLocaleDateString('es-CO', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-slate-950">
-      {/* Top Bar */}
-      <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-40 px-6 h-18 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-slate-950 shadow-lg shadow-emerald-500/20">
-            <Dumbbell className="w-6 h-6 stroke-[2.5]" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-white text-lg tracking-tight">{session.tenantName}</span>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                schema: {session.tenantSchema}
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Admin: <span className="text-slate-300 font-medium">{session.name}</span> ({session.email})
-            </p>
-          </div>
-        </div>
+    <div className="relative isolate min-h-dvh overflow-x-hidden bg-obsidian text-foreground font-sans selection:bg-volt/30 selection:text-white">
+      {/* Background kinetic ambient lighting */}
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 -z-10">
+        <div className="absolute -top-40 left-1/4 size-[560px] rounded-full bg-volt/[0.06] blur-[120px]" />
+        <div className="absolute right-[-10%] bottom-[-20%] size-[520px] rounded-full bg-plasma/[0.06] blur-[140px]" />
+        <div className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.035)_1px,transparent_1px)] [background-size:24px_24px] [mask-image:radial-gradient(ellipse_at_top,black,transparent_70%)]" />
+      </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setActiveTab('inspector')}
-            className={`text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition ${
-              activeTab === 'inspector'
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
-                : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:text-white'
-            }`}
-          >
-            <Shield className="w-4 h-4 text-cyan-400" /> Inspector Sustentación
-          </button>
-
-          <button
-            onClick={handleLogout}
-            className="text-xs text-slate-400 hover:text-rose-400 p-2 rounded-lg hover:bg-slate-800 transition flex items-center gap-1.5"
-            title="Cerrar sesión"
-          >
-            <LogOut className="w-4 h-4" /> Salir
-          </button>
-        </div>
-      </header>
+      {/* Floating Sidebar interactivo */}
+      <FloatingSidebar activeTab={activeTab} onTabChange={(t) => setActiveTab(t)} />
 
       {/* Main Container */}
-      <div className="max-w-7xl mx-auto w-full px-6 py-8 flex-1 flex flex-col">
-        {/* Navigation Tabs */}
-        <div className="flex gap-2 border-b border-slate-800 pb-4 mb-8 overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('resumen')}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center gap-2 cursor-pointer ${
-              activeTab === 'resumen'
-                ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
-            }`}
-          >
-            <Sparkles className="w-4 h-4" /> Resumen & Asesor IA
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('socios');
-              fetchSocios();
-            }}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center gap-2 cursor-pointer ${
-              activeTab === 'socios'
-                ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
-            }`}
-          >
-            <Users className="w-4 h-4" /> Socios ({stats.totalSocios})
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('asistencias');
-              fetchAsistencias();
-            }}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center gap-2 cursor-pointer ${
-              activeTab === 'asistencias'
-                ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
-            }`}
-          >
-            <UserCheck className="w-4 h-4" /> Control de Asistencias
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('planes');
-              fetchPlanes();
-            }}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center gap-2 cursor-pointer ${
-              activeTab === 'planes'
-                ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
-            }`}
-          >
-            <CreditCard className="w-4 h-4" /> Planes de Membresía
-          </button>
-        </div>
+      <div className="mx-auto w-full max-w-[1480px] px-4 pb-28 sm:px-6 lg:pr-8 lg:pb-12 lg:pl-28">
+        <TopBar
+          tenantName={session.tenantName}
+          tenantSchema={session.tenantSchema}
+          adminName={session.name}
+          adminEmail={session.email}
+          onLogout={handleLogout}
+          onOpenInspector={() => setActiveTab('inspector')}
+          searchValue={searchTerm}
+          onSearch={(v) => {
+            setSearchTerm(v);
+            if (activeTab !== 'socios') setActiveTab('socios');
+          }}
+        />
 
-        {/* TAB 1: RESUMEN & IA */}
-        {activeTab === 'resumen' && (
-          <div className="space-y-8">
-            {/* Stat Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800">
-                <div className="flex items-center justify-between text-slate-400 mb-2">
-                  <span className="text-xs font-semibold uppercase">Total Socios</span>
-                  <Users className="w-5 h-5 text-emerald-400" />
-                </div>
-                <div className="text-3xl font-extrabold text-white">{stats.totalSocios}</div>
-                <div className="text-xs text-slate-500 mt-1">Registrados en {session.tenantSchema}</div>
-              </div>
-
-              <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800">
-                <div className="flex items-center justify-between text-slate-400 mb-2">
-                  <span className="text-xs font-semibold uppercase">Socios Activos</span>
-                  <CheckCircle2 className="w-5 h-5 text-teal-400" />
-                </div>
-                <div className="text-3xl font-extrabold text-white">{stats.sociosActivos}</div>
-                <div className="text-xs text-teal-400/80 mt-1">Con membresía habilitada</div>
-              </div>
-
-              <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800">
-                <div className="flex items-center justify-between text-slate-400 mb-2">
-                  <span className="text-xs font-semibold uppercase">Accesos Hoy</span>
-                  <UserCheck className="w-5 h-5 text-cyan-400" />
-                </div>
-                <div className="text-3xl font-extrabold text-white">{stats.asistenciasHoy}</div>
-                <div className="text-xs text-slate-500 mt-1">Validaciones de torniquete</div>
-              </div>
-
-              <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800">
-                <div className="flex items-center justify-between text-slate-400 mb-2">
-                  <span className="text-xs font-semibold uppercase">Planes Activos</span>
-                  <CreditCard className="w-5 h-5 text-indigo-400" />
-                </div>
-                <div className="text-3xl font-extrabold text-white">{planes.length || stats.totalPlanes}</div>
-                <div className="text-xs text-slate-500 mt-1">Configurados para venta</div>
-              </div>
-            </div>
-
-            {/* AI Advisor Panel (Bonus Section 5.1) */}
-            <div className="p-7 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900/90 to-emerald-950/30 border border-emerald-500/20">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-5">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                    <Sparkles className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                      Asesor de Negocio con IA (Gemini)
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold">
-                        +10 Pts Extra
-                      </span>
-                    </h3>
-                    <p className="text-xs text-slate-400">
-                      Analiza métricas de socios, afluencia y membresías del gimnasio para sugerir acciones.
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleGenerateAi}
-                  disabled={loadingAi}
-                  className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition shadow-lg shadow-emerald-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  {loadingAi ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" /> Analizando métricas...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" /> Generar Diagnóstico IA
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {aiData ? (
-                <div className="mt-4 p-5 rounded-xl bg-slate-950/80 border border-slate-800 text-sm text-slate-300 leading-relaxed space-y-2 whitespace-pre-line font-sans">
-                  <div className="flex items-center justify-between text-xs text-slate-500 border-b border-slate-800 pb-2 mb-3">
-                    <span>Modelo: {aiData.modelUsed}</span>
-                    <span className="font-mono text-emerald-400">Origen: {aiData.source.toUpperCase()}</span>
-                  </div>
-                  {aiData.insights}
-                </div>
-              ) : (
-                <div className="text-xs text-slate-500 text-center py-6 border border-dashed border-slate-800 rounded-xl">
-                  Haz clic en &ldquo;Generar Diagnóstico IA&rdquo; para obtener recomendaciones estratégicas basadas en tus socios y afluencia.
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* TAB 2: SOCIOS CRUD */}
-        {activeTab === 'socios' && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="relative w-full sm:w-80">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                <input
-                  type="text"
-                  placeholder="Buscar por nombre o documento..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && fetchSocios()}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-                />
-              </div>
-
-              <div className="flex items-center gap-3 w-full sm:w-auto">
-                <button
-                  onClick={fetchSocios}
-                  className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white transition"
-                  title="Recargar"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setShowSocioModal(true)}
-                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" /> Nuevo Socio
-                </button>
-              </div>
-            </div>
-
-            {/* Socios Table */}
-            <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-900/60">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-900 text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-800">
-                  <tr>
-                    <th className="py-3.5 px-4 font-semibold">Socio</th>
-                    <th className="py-3.5 px-4 font-semibold">Documento</th>
-                    <th className="py-3.5 px-4 font-semibold">Plan Asignado</th>
-                    <th className="py-3.5 px-4 font-semibold">Estado</th>
-                    <th className="py-3.5 px-4 font-semibold">Fecha Registro</th>
-                    <th className="py-3.5 px-4 font-semibold text-right">Acción</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {loadingSocios ? (
-                    <tr>
-                      <td colSpan={6} className="py-12 text-center text-slate-500">
-                        <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" /> Cargando socios de {session.tenantSchema}...
-                      </td>
-                    </tr>
-                  ) : socios.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-12 text-center text-slate-500">
-                        No hay socios registrados. Crea el primero con el botón &ldquo;Nuevo Socio&rdquo;.
-                      </td>
-                    </tr>
-                  ) : (
-                    socios.map((s) => (
-                      <tr key={s.id} className="hover:bg-slate-850/50 transition">
-                        <td className="py-3.5 px-4">
-                          <div className="font-semibold text-white">{s.nombre}</div>
-                          <div className="text-[11px] text-slate-400">{s.email || 'Sin correo'}</div>
-                        </td>
-                        <td className="py-3.5 px-4 font-mono text-slate-300">{s.documento}</td>
-                        <td className="py-3.5 px-4">
-                          <span className="font-medium text-emerald-400">{s.plan_nombre || 'Sin Plan'}</span>
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                              s.estado === 'activo'
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                                : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
-                            }`}
-                          >
-                            {s.estado}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-4 text-slate-400">
-                          {new Date(s.fecha_inicio).toLocaleDateString()}
-                        </td>
-                        <td className="py-3.5 px-4 text-right">
-                          <button
-                            onClick={() => handleCheckin(s.id)}
-                            disabled={registeringCheckin}
-                            className="px-2.5 py-1 rounded-lg bg-teal-500/10 text-teal-300 border border-teal-500/30 hover:bg-teal-500/20 transition text-[11px] font-semibold cursor-pointer"
-                          >
-                            Check-in
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Modal Nuevo Socio */}
-            {showSocioModal && (
-              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
-                  <h3 className="text-lg font-bold text-white mb-1">Registrar Nuevo Socio</h3>
-                  <p className="text-xs text-slate-400 mb-5">
-                    Se creará en el schema <code className="text-emerald-400">{session.tenantSchema}</code> con Idempotency-Key.
-                  </p>
-
-                  {socioFeedback && (
-                    <div className="p-3 mb-4 rounded-xl bg-rose-500/10 text-rose-400 text-xs border border-rose-500/30">
-                      {socioFeedback}
-                    </div>
-                  )}
-
-                  <form onSubmit={handleSaveSocio} className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1">Nombre Completo *</label>
-                      <input
-                        type="text"
-                        required
-                        value={socioForm.nombre}
-                        onChange={(e) => setSocioForm({ ...socioForm, nombre: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1">Documento / DNI *</label>
-                      <input
-                        type="text"
-                        required
-                        value={socioForm.documento}
-                        onChange={(e) => setSocioForm({ ...socioForm, documento: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">Email</label>
-                        <input
-                          type="email"
-                          value={socioForm.email}
-                          onChange={(e) => setSocioForm({ ...socioForm, email: e.target.value })}
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">Teléfono</label>
-                        <input
-                          type="tel"
-                          value={socioForm.telefono}
-                          onChange={(e) => setSocioForm({ ...socioForm, telefono: e.target.value })}
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1">Plan de Membresía</label>
-                      <select
-                        value={socioForm.planId}
-                        onChange={(e) => setSocioForm({ ...socioForm, planId: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                      >
-                        <option value="">Seleccionar plan...</option>
-                        {planes.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.nombre} (${Number(p.precio).toLocaleString()})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1">Estado</label>
-                      <select
-                        value={socioForm.estado}
-                        onChange={(e) => setSocioForm({ ...socioForm, estado: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                      >
-                        <option value="activo">Activo (Habilitado para entrar)</option>
-                        <option value="inactivo">Inactivo (Suspendido)</option>
-                      </select>
-                    </div>
-
-                    <div className="flex justify-end gap-3 pt-3">
-                      <button
-                        type="button"
-                        onClick={() => setShowSocioModal(false)}
-                        className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white bg-slate-800"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={savingSocio}
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500 text-slate-950 hover:bg-emerald-400 flex items-center gap-1.5"
-                      >
-                        {savingSocio && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Guardar Socio
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 3: ASISTENCIAS (CHECK-IN) */}
-        {activeTab === 'asistencias' && (
-          <div className="space-y-6">
-            {/* Quick Check-in Box */}
-            <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800">
-              <h3 className="text-base font-bold text-white mb-1">Registro Rápido de Acceso (Torniquete / Recepción)</h3>
-              <p className="text-xs text-slate-400 mb-4">
-                Valida en tiempo real que el socio pertenezca al gimnasio y esté en estado &apos;activo&apos;.
+        <main className="flex flex-col gap-8 pt-4">
+          {/* Greeting Hero Bar */}
+          <div className="flex animate-rise flex-wrap items-end justify-between gap-4">
+            <div className="flex flex-col gap-2">
+              <p className="font-mono text-[11px] tracking-[0.2em] text-white/40 uppercase">
+                {fechaHoy} · PostgreSQL Schema: {session.tenantSchema}
               </p>
-
-              {checkinMessage && (
-                <div
-                  className={`p-3 rounded-xl mb-4 text-xs flex items-center gap-2 ${
-                    checkinMessage.error
-                      ? 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
-                      : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
-                  }`}
-                >
-                  {checkinMessage.error ? <XCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-                  <span>{checkinMessage.text}</span>
-                </div>
-              )}
-
-              <div className="flex flex-col sm:flex-row gap-3">
-                <select
-                  value={selectedSocioForCheckin}
-                  onChange={(e) => setSelectedSocioForCheckin(e.target.value)}
-                  className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="">Seleccionar socio para validar acceso...</option>
-                  {socios.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nombre} - Doc: {s.documento} ({s.estado.toUpperCase()})
-                    </option>
-                  ))}
-                </select>
-
-                <button
-                  onClick={() => selectedSocioForCheckin && handleCheckin(selectedSocioForCheckin)}
-                  disabled={!selectedSocioForCheckin || registeringCheckin}
-                  className="px-6 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs transition shadow-lg shadow-teal-500/20 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  {registeringCheckin ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserCheck className="w-4 h-4" />}
-                  Validar Acceso
-                </button>
-              </div>
+              <h1 className="font-display text-4xl font-semibold tracking-[-0.04em] text-balance text-white md:text-5xl">
+                {saludo}, {primerNombre}<span className="text-volt">.</span>
+              </h1>
             </div>
+            <p className="max-w-xs text-sm text-pretty text-white/45">
+              Tu gimnasio tiene aforo <span className="text-white font-medium">activo</span> y la facturación está{' '}
+              <span className="text-volt font-medium">superando el objetivo</span>.
+            </p>
+          </div>
 
-            {/* Asistencias Table */}
-            <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-900/60">
-              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                  Últimos Accesos Registrados en {session.tenantSchema}
-                </h4>
-                <button onClick={fetchAsistencias} className="text-slate-400 hover:text-white text-xs flex items-center gap-1">
-                  <RefreshCw className="w-3.5 h-3.5" /> Actualizar
-                </button>
+          {/* TAB: RESUMEN / BENTO GRID */}
+          {activeTab === 'resumen' && (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
+              <ActiveMembersCard
+                count={stats.sociosActivos}
+                totalCount={stats.totalSocios}
+                className="lg:col-span-8"
+              />
+              <LiveCapacityCard liveCount={stats.asistenciasHoy} className="lg:col-span-4 lg:row-span-2" />
+              <RevenueCard totalRevenue={totalIngresosEstimados} className="lg:col-span-8" />
+              <CheckInsTable
+                checkIns={checkInsItems}
+                onRefresh={fetchAsistencias}
+                onViewAll={() => setActiveTab('asistencias')}
+                className="lg:col-span-8"
+              />
+              <QuickActionsCard
+                onRegister={() => setShowSocioModal(true)}
+                onCheckin={() => setActiveTab('asistencias')}
+                onNewPlan={() => {
+                  setActiveTab('planes');
+                  setShowPlanModal(true);
+                }}
+                onAiAnalytics={handleGenerateAi}
+                onInspector={() => setActiveTab('inspector')}
+                className="lg:sticky lg:top-6 lg:col-span-4 lg:self-start"
+              />
+
+              {/* AI Diagnóstico Panel (Bento integration) */}
+              <BentoCard className="lg:col-span-12">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-2xl bg-volt/15 text-volt ring-1 ring-volt/30">
+                      <Sparkles className="size-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-display text-lg font-semibold text-white flex items-center gap-2">
+                        Diagnóstico Estratégico Asistido por IA (Google Gemini)
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-volt/20 text-volt border border-volt/30 font-medium">
+                          Bonus +10 Pts
+                        </span>
+                      </h3>
+                      <p className="text-xs text-white/50">
+                        Evaluación en tiempo real del modelo de miembros y afluencia por schema.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleGenerateAi}
+                    disabled={loadingAi}
+                    className="h-10 px-5 rounded-full bg-volt text-obsidian font-semibold text-xs transition-all hover:bg-volt/90 hover:shadow-[0_0_24px_rgba(212,255,0,0.4)] flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {loadingAi ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin" /> Analizando...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="size-4" /> Generar Diagnóstico IA
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {aiData ? (
+                  <div className="mt-4 p-5 rounded-2xl border border-white/10 bg-white/[0.03] text-sm text-white/80 leading-relaxed whitespace-pre-line font-sans">
+                    <div className="flex items-center justify-between text-xs text-white/40 border-b border-white/[0.06] pb-2 mb-3 font-mono">
+                      <span>Modelo: {aiData.modelUsed}</span>
+                      <span className="text-volt">ORIGEN: {aiData.source.toUpperCase()}</span>
+                    </div>
+                    {aiData.insights}
+                  </div>
+                ) : (
+                  <div className="text-xs text-white/40 text-center py-6 border border-dashed border-white/10 rounded-2xl">
+                    Haz clic en &ldquo;Generar Diagnóstico IA&rdquo; para obtener recomendaciones de crecimiento para tu gimnasio.
+                  </div>
+                )}
+              </BentoCard>
+            </div>
+          )}
+
+          {/* TAB: SOCIOS */}
+          {activeTab === 'socios' && (
+            <BentoCard className="p-6">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+                <div>
+                  <CardEyebrow id="socios-list">Directorio de Socios</CardEyebrow>
+                  <p className="text-xs text-white/50 mt-1">
+                    Registros en tiempo real en la tabla <code className="text-volt font-mono">{session.tenantSchema}.socios</code>
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <div className="relative w-full sm:w-72">
+                    <Search className="size-4 text-white/40 absolute left-3.5 top-3" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por nombre o documento..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && fetchSocios()}
+                      className="h-10 w-full rounded-full border border-white/10 bg-white/[0.03] pl-10 pr-4 text-xs text-white placeholder:text-white/30 focus:border-volt/50 focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    onClick={fetchSocios}
+                    className="p-2.5 rounded-full border border-white/10 bg-white/[0.03] text-white/60 hover:text-white transition cursor-pointer"
+                    title="Actualizar socios"
+                  >
+                    <RefreshCw className="size-4" />
+                  </button>
+                  <button
+                    onClick={() => setShowSocioModal(true)}
+                    className="h-10 px-5 rounded-full bg-volt text-obsidian font-semibold text-xs transition hover:bg-volt/90 hover:shadow-[0_0_24px_rgba(212,255,0,0.3)] flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <Plus className="size-4" /> Registrar Socio
+                  </button>
+                </div>
               </div>
 
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-900 text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-800">
-                  <tr>
-                    <th className="py-3 px-4 font-semibold">Fecha y Hora</th>
-                    <th className="py-3 px-4 font-semibold">Socio</th>
-                    <th className="py-3 px-4 font-semibold">Documento</th>
-                    <th className="py-3 px-4 font-semibold">Plan</th>
-                    <th className="py-3 px-4 font-semibold">Observación</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {loadingAsistencias ? (
+              {/* Table */}
+              <div className="overflow-x-auto rounded-2xl border border-white/[0.08] bg-white/[0.01]">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-white/[0.08] bg-white/[0.03] text-[11px] font-medium uppercase tracking-wider text-white/40">
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-slate-500">
-                        <Loader2 className="w-4 h-4 animate-spin mx-auto mb-1" /> Cargando asistencias...
-                      </td>
+                      <th className="py-3.5 px-5">Socio</th>
+                      <th className="py-3.5 px-4">Documento</th>
+                      <th className="py-3.5 px-4">Plan Asignado</th>
+                      <th className="py-3.5 px-4">Estado</th>
+                      <th className="py-3.5 px-4">Fecha Inicio</th>
+                      <th className="py-3.5 px-5 text-right">Acción</th>
                     </tr>
-                  ) : asistencias.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="py-8 text-center text-slate-500">
-                        No hay registros de acceso aún.
-                      </td>
-                    </tr>
-                  ) : (
-                    asistencias.map((a) => (
-                      <tr key={a.id} className="hover:bg-slate-850/50">
-                        <td className="py-3 px-4 font-mono text-slate-400">
-                          {new Date(a.fecha_hora).toLocaleTimeString()} · {new Date(a.fecha_hora).toLocaleDateString()}
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.05]">
+                    {loadingSocios ? (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-white/40">
+                          <Loader2 className="size-5 animate-spin mx-auto mb-2 text-volt" /> Cargando socios de {session.tenantSchema}...
                         </td>
-                        <td className="py-3 px-4 font-semibold text-white">{a.socio_nombre}</td>
-                        <td className="py-3 px-4 font-mono text-slate-300">{a.socio_documento}</td>
-                        <td className="py-3 px-4 text-emerald-400">{a.plan_nombre || 'General'}</td>
-                        <td className="py-3 px-4 text-slate-400">{a.observaciones || 'Entrada regular'}</td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: PLANES */}
-        {activeTab === 'planes' && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-bold text-white">Planes y Tarifas</h3>
-                <p className="text-xs text-slate-400">Tabla exclusiva de {session.tenantSchema}.planes</p>
+                    ) : socios.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-white/40">
+                          No hay socios registrados aún. Haz clic en &ldquo;Registrar Socio&rdquo;.
+                        </td>
+                      </tr>
+                    ) : (
+                      socios.map((s) => (
+                        <tr key={s.id} className="hover:bg-white/[0.02] transition">
+                          <td className="py-3.5 px-5">
+                            <div className="font-medium text-white">{s.nombre}</div>
+                            <div className="text-[11px] text-white/40">{s.email || 'Sin correo registrado'}</div>
+                          </td>
+                          <td className="py-3.5 px-4 font-mono text-white/70">{s.documento}</td>
+                          <td className="py-3.5 px-4">
+                            <span className="font-medium text-volt">{s.plan_nombre || 'Sin Plan'}</span>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-medium uppercase ${
+                                s.estado === 'activo'
+                                  ? 'bg-volt/10 text-volt border border-volt/20'
+                                  : 'bg-white/10 text-white/60 border border-white/15'
+                              }`}
+                            >
+                              {s.estado}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-white/50">
+                            {new Date(s.fecha_inicio).toLocaleDateString()}
+                          </td>
+                          <td className="py-3.5 px-5 text-right">
+                            <button
+                              onClick={() => handleCheckin(s.id)}
+                              disabled={registeringCheckin}
+                              className="px-3 py-1 rounded-full bg-volt/10 hover:bg-volt/20 text-volt border border-volt/30 text-[11px] font-medium transition cursor-pointer"
+                            >
+                              Check-in
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
-              <button
-                onClick={() => setShowPlanModal(true)}
-                className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition shadow-lg shadow-emerald-500/20 flex items-center gap-2 cursor-pointer"
-              >
-                <Plus className="w-4 h-4" /> Crear Plan
-              </button>
-            </div>
+            </BentoCard>
+          )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {planes.map((plan) => (
-                <div key={plan.id} className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col justify-between">
+          {/* TAB: ASISTENCIAS */}
+          {activeTab === 'asistencias' && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+              {/* Quick check-in box */}
+              <BentoCard className="lg:col-span-5 p-6">
+                <CardEyebrow id="checkin-gate">Torniquete de Acceso</CardEyebrow>
+                <h3 className="font-display text-xl font-semibold text-white mt-2 mb-1">
+                  Validación de Ingreso en Tiempo Real
+                </h3>
+                <p className="text-xs text-white/50 mb-5 leading-relaxed">
+                  Verifica pertenencia al gimnasio y estado activo en <code className="text-volt font-mono">{session.tenantSchema}</code>.
+                </p>
+
+                {checkinMessage && (
+                  <div
+                    className={`p-3.5 rounded-2xl mb-4 text-xs flex items-center gap-2.5 ${
+                      checkinMessage.error
+                        ? 'bg-plasma/10 border border-plasma/30 text-plasma'
+                        : 'bg-volt/10 border border-volt/30 text-volt'
+                    }`}
+                  >
+                    {checkinMessage.error ? <XCircle className="size-4 shrink-0" /> : <CheckCircle2 className="size-4 shrink-0" />}
+                    <span>{checkinMessage.text}</span>
+                  </div>
+                )}
+
+                <div className="space-y-4">
                   <div>
-                    <h4 className="text-lg font-bold text-white mb-1">{plan.nombre}</h4>
-                    <div className="text-2xl font-extrabold text-emerald-400 mb-3">
-                      ${Number(plan.precio).toLocaleString()} <span className="text-xs text-slate-400 font-normal">/ {plan.duracion_dias} días</span>
-                    </div>
-                    <p className="text-xs text-slate-400 leading-relaxed">{plan.descripcion || 'Sin descripción adicional.'}</p>
+                    <label className="block text-xs font-medium text-white/70 mb-2">
+                      Seleccionar Socio para Validación
+                    </label>
+                    <select
+                      value={selectedSocioForCheckin}
+                      onChange={(e) => setSelectedSocioForCheckin(e.target.value)}
+                      className="w-full h-11 rounded-full border border-white/10 bg-white/[0.04] px-4 text-xs text-white focus:border-volt/50 focus:outline-none"
+                    >
+                      <option value="" className="bg-zinc-950 text-white">Seleccionar socio...</option>
+                      {socios.map((s) => (
+                        <option key={s.id} value={s.id} className="bg-zinc-950 text-white">
+                          {s.nombre} · Doc: {s.documento} ({s.estado.toUpperCase()})
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="mt-6 pt-4 border-t border-slate-800/80 text-[11px] text-slate-500">
-                    Duración: {plan.duracion_dias} días naturales
-                  </div>
+
+                  <button
+                    onClick={() => selectedSocioForCheckin && handleCheckin(selectedSocioForCheckin)}
+                    disabled={!selectedSocioForCheckin || registeringCheckin}
+                    className="w-full h-12 rounded-full bg-volt text-obsidian font-semibold text-xs transition hover:bg-volt/90 hover:shadow-[0_0_24px_rgba(212,255,0,0.3)] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {registeringCheckin ? <Loader2 className="size-4 animate-spin" /> : <UserCheck className="size-4" />}
+                    Validar Acceso
+                  </button>
                 </div>
-              ))}
+              </BentoCard>
+
+              {/* History Table */}
+              <CheckInsTable
+                checkIns={checkInsItems}
+                onRefresh={fetchAsistencias}
+                className="lg:col-span-7"
+              />
             </div>
+          )}
 
-            {/* Modal Crear Plan */}
-            {showPlanModal && (
-              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
-                  <h3 className="text-lg font-bold text-white mb-4">Crear Plan de Membresía</h3>
-                  <form onSubmit={handleSavePlan} className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1">Nombre del Plan</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Ej: Plan Anual Black"
-                        value={planForm.nombre}
-                        onChange={(e) => setPlanForm({ ...planForm, nombre: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">Precio ($)</label>
-                        <input
-                          type="number"
-                          required
-                          placeholder="80000"
-                          value={planForm.precio}
-                          onChange={(e) => setPlanForm({ ...planForm, precio: e.target.value })}
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">Duración (Días)</label>
-                        <input
-                          type="number"
-                          required
-                          value={planForm.duracionDias}
-                          onChange={(e) => setPlanForm({ ...planForm, duracionDias: e.target.value })}
-                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1">Descripción</label>
-                      <textarea
-                        rows={2}
-                        value={planForm.descripcion}
-                        onChange={(e) => setPlanForm({ ...planForm, descripcion: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
-                      />
-                    </div>
-                    <div className="flex justify-end gap-3 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowPlanModal(false)}
-                        className="px-4 py-2 rounded-xl text-xs text-slate-400 bg-slate-800"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={savingPlan}
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500 text-slate-950"
-                      >
-                        Guardar Plan
-                      </button>
-                    </div>
-                  </form>
+          {/* TAB: PLANES */}
+          {activeTab === 'planes' && (
+            <BentoCard className="p-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                <div>
+                  <CardEyebrow id="planes-title">Catálogo de Membresías</CardEyebrow>
+                  <p className="text-xs text-white/50 mt-1">
+                    Planes exclusivos de <code className="text-volt font-mono">{session.tenantSchema}.planes</code>
+                  </p>
                 </div>
+                <button
+                  onClick={() => setShowPlanModal(true)}
+                  className="h-10 px-5 rounded-full bg-volt text-obsidian font-semibold text-xs transition hover:bg-volt/90 hover:shadow-[0_0_24px_rgba(212,255,0,0.3)] flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="size-4" /> Crear Plan
+                </button>
               </div>
-            )}
-          </div>
-        )}
 
-        {/* TAB 5: INSPECTOR DE ARQUITECTURA & SUSTENTACIÓN */}
-        {activeTab === 'inspector' && (
-          <div className="space-y-6">
-            <div className="p-6 rounded-2xl bg-slate-900 border border-cyan-500/30">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {planes.map((p) => (
+                  <div
+                    key={p.id}
+                    className="rounded-3xl border border-white/10 bg-white/[0.025] p-6 flex flex-col justify-between hover:border-white/20 transition"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="font-display text-lg font-semibold text-white">{p.nombre}</h4>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-white/60">
+                          {p.duracion_dias} días
+                        </span>
+                      </div>
+                      <div className="font-display text-3xl font-bold text-volt mb-3">
+                        ${Number(p.precio).toLocaleString()}
+                      </div>
+                      <p className="text-xs text-white/50 leading-relaxed">
+                        {p.descripcion || 'Sin descripción adicional para este plan.'}
+                      </p>
+                    </div>
+                    <div className="mt-6 pt-4 border-t border-white/[0.06] text-[11px] text-white/40">
+                      Vigencia: {p.duracion_dias} días naturales
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </BentoCard>
+          )}
+
+          {/* TAB: INSPECTOR SUSTENTACIÓN */}
+          {activeTab === 'inspector' && (
+            <BentoCard className="p-6">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
-                  <Shield className="w-5 h-5" />
+                <div className="flex size-10 items-center justify-center rounded-2xl bg-volt/15 text-volt ring-1 ring-volt/30">
+                  <Shield className="size-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-white">Panel de Demostración para Sustentación</h3>
-                  <p className="text-xs text-slate-400">
-                    Herramienta interactiva para verificar en vivo los requisitos del evaluador docente.
+                  <h3 className="font-display text-lg font-semibold text-white">
+                    Inspector de Arquitectura & Telemetría
+                  </h3>
+                  <p className="text-xs text-white/50">
+                    Herramienta de verificación en vivo para la sustentación docente.
                   </p>
                 </div>
               </div>
 
-              {/* Data isolation checklist */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-2">
-                  <div className="text-slate-400 font-semibold uppercase text-[10px]">Contexto de Aislamiento PostgreSQL</div>
-                  <div>Tenant ID: <code className="text-emerald-400 font-mono">{session.tenantId}</code></div>
-                  <div>Slug del Gimnasio: <code className="text-emerald-400 font-mono">{session.tenantSlug}</code></div>
-                  <div>PostgreSQL Schema: <code className="text-cyan-400 font-mono font-bold">{session.tenantSchema}</code></div>
-                  <div>Search Path activo: <code className="text-cyan-300 font-mono">&ldquo;{session.tenantSchema}&rdquo;, public</code></div>
+              {/* Specs */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6">
+                <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.02] text-xs space-y-2 font-mono">
+                  <div className="text-white/40 uppercase text-[10px] tracking-wider">Aislamiento de Schema en PostgreSQL</div>
+                  <div>Tenant ID: <span className="text-white">{session.tenantId}</span></div>
+                  <div>Slug: <span className="text-white">{session.tenantSlug}</span></div>
+                  <div>Schema PostgreSQL: <span className="text-volt font-bold">{session.tenantSchema}</span></div>
+                  <div>Search Path activo: <span className="text-white/80">&ldquo;{session.tenantSchema}&rdquo;, public</span></div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-2">
-                  <div className="text-slate-400 font-semibold uppercase text-[10px]">Mecanismos de Robustez</div>
-                  <div>Autenticación: <span className="text-emerald-400 font-semibold">JWT en cookie httpOnly</span></div>
-                  <div>Idempotencia: <span className="text-teal-400 font-semibold">Header Idempotency-Key + PostgreSQL TTL 24h</span></div>
-                  <div>Rate Limiting: <span className="text-cyan-400 font-semibold">Sliding Window (429 + Retry-After)</span></div>
-                  <div>Renderizado: <span className="text-indigo-400 font-semibold">SSR (Dashboard) + SSG (Landing) + CSR</span></div>
+                <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.02] text-xs space-y-2 font-mono">
+                  <div className="text-white/40 uppercase text-[10px] tracking-wider">Mecanismos de Robustez</div>
+                  <div>Autenticación: <span className="text-volt">JWT en cookie httpOnly</span></div>
+                  <div>Idempotencia: <span className="text-volt">Header Idempotency-Key + SHA-256</span></div>
+                  <div>Rate Limiter: <span className="text-volt">Sliding Window (429 + Retry-After)</span></div>
+                  <div>Renderizado: <span className="text-volt">SSR (Dashboard) + SSG (Landing) + CSR</span></div>
                 </div>
               </div>
 
-              {/* Live Action Tests */}
-              <div className="flex flex-wrap gap-4 mb-6">
+              {/* Action Buttons */}
+              <div className="flex flex-wrap gap-3 mb-6">
                 <button
                   onClick={runLiveIdempotencyTest}
                   disabled={testingIdempotency}
-                  className="px-5 py-3 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs transition shadow-lg shadow-teal-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="h-11 px-5 rounded-full bg-volt text-obsidian font-semibold text-xs transition hover:bg-volt/90 hover:shadow-[0_0_24px_rgba(212,255,0,0.3)] flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  {testingIdempotency ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                  {testingIdempotency ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
                   Ejecutar Prueba de Idempotencia en Vivo
                 </button>
 
                 <button
                   onClick={runLiveRateLimitTest}
                   disabled={testingRateLimit}
-                  className="px-5 py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition shadow-lg shadow-cyan-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="h-11 px-5 rounded-full border border-white/15 bg-white/[0.04] text-white hover:bg-white/[0.08] font-semibold text-xs transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  {testingRateLimit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                  {testingRateLimit ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
                   Ejecutar Prueba de Rate Limiting (429) en Vivo
                 </button>
               </div>
 
-              {/* Live Log Console */}
+              {/* Log Console */}
               {testLog.length > 0 && (
-                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800">
-                  <div className="text-xs font-mono font-bold text-slate-400 mb-2 flex items-center gap-2">
-                    <Clock className="w-3.5 h-3.5 text-emerald-400" /> Registro de Ejecución en Vivo:
+                <div className="p-4 rounded-2xl border border-white/10 bg-black/80 font-mono text-xs">
+                  <div className="text-white/40 mb-2 flex items-center gap-2 text-[11px]">
+                    <Clock className="size-3.5 text-volt" /> Registro de Ejecución:
                   </div>
-                  <div className="space-y-1 font-mono text-[11px] text-slate-300">
+                  <div className="space-y-1 text-white/80 text-[11px]">
                     {testLog.map((log, index) => (
-                      <div key={index} className={log.includes('PRUEBA SUPERADA') ? 'text-emerald-400 font-bold' : ''}>
+                      <div key={index} className={log.includes('PRUEBA SUPERADA') ? 'text-volt font-bold' : ''}>
                         {log}
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-            </div>
-          </div>
-        )}
+            </BentoCard>
+          )}
+        </main>
       </div>
+
+      {/* Modal Real de Crear Socio */}
+      <NewMemberDialog
+        open={showSocioModal}
+        onOpenChange={setShowSocioModal}
+        planes={planes}
+        onCreate={handleSaveSocio}
+        saving={savingSocio}
+        feedback={socioFeedback}
+      />
+
+      {/* Modal Crear Plan */}
+      {showPlanModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-950 border border-white/15 rounded-3xl p-6 max-w-md w-full shadow-2xl text-foreground">
+            <h3 className="font-display text-xl font-semibold text-white mb-2">Crear Plan de Membresía</h3>
+            <p className="text-xs text-white/50 mb-4">
+              Se creará en <code className="text-volt font-mono">{session.tenantSchema}.planes</code>
+            </p>
+
+            <form onSubmit={handleSavePlan} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-white/80 mb-1">Nombre del Plan *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: Plan Anual Black"
+                  value={planForm.nombre}
+                  onChange={(e) => setPlanForm({ ...planForm, nombre: e.target.value })}
+                  className="w-full h-10 bg-white/[0.04] border border-white/10 rounded-full px-4 text-xs text-white focus:border-volt/50 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-white/80 mb-1">Precio ($) *</label>
+                  <input
+                    type="number"
+                    required
+                    placeholder="80000"
+                    value={planForm.precio}
+                    onChange={(e) => setPlanForm({ ...planForm, precio: e.target.value })}
+                    className="w-full h-10 bg-white/[0.04] border border-white/10 rounded-full px-4 text-xs text-white focus:border-volt/50 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-white/80 mb-1">Duración (Días) *</label>
+                  <input
+                    type="number"
+                    required
+                    value={planForm.duracionDias}
+                    onChange={(e) => setPlanForm({ ...planForm, duracionDias: e.target.value })}
+                    className="w-full h-10 bg-white/[0.04] border border-white/10 rounded-full px-4 text-xs text-white focus:border-volt/50 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-white/80 mb-1">Descripción</label>
+                <textarea
+                  rows={2}
+                  placeholder="Acceso total a zonas húmedas y clases grupales..."
+                  value={planForm.descripcion}
+                  onChange={(e) => setPlanForm({ ...planForm, descripcion: e.target.value })}
+                  className="w-full bg-white/[0.04] border border-white/10 rounded-2xl p-3 text-xs text-white focus:border-volt/50 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPlanModal(false)}
+                  className="h-10 px-5 rounded-full text-xs text-white/60 hover:text-white"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingPlan}
+                  className="h-10 px-5 rounded-full bg-volt text-obsidian font-semibold text-xs hover:bg-volt/90 cursor-pointer"
+                >
+                  {savingPlan ? 'Guardando...' : 'Crear Plan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
