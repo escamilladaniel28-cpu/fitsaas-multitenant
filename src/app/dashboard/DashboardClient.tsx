@@ -26,6 +26,7 @@ import { CheckInsTable, type CheckInItem } from '@/components/kinetic/checkins-t
 import { QuickActionsCard } from '@/components/kinetic/quick-actions-card';
 import { NewMemberDialog } from '@/components/dashboard/new-member-dialog';
 import { BentoCard, CardEyebrow } from '@/components/kinetic/bento-card';
+import { ClassesView } from '@/components/kinetic/classes-view';
 
 interface SessionInfo {
   userId: string;
@@ -367,7 +368,11 @@ export default function DashboardClient({
       </div>
 
       {/* Floating Sidebar interactivo */}
-      <FloatingSidebar activeTab={activeTab} onTabChange={(t) => setActiveTab(t)} />
+      <FloatingSidebar
+        activeTab={activeTab}
+        onTabChange={(t) => setActiveTab(t)}
+        userRole={session.role}
+      />
 
       {/* Main Container */}
       <div className="mx-auto w-full max-w-[1480px] px-4 pb-28 sm:px-6 lg:pr-8 lg:pb-12 lg:pl-28">
@@ -411,7 +416,9 @@ export default function DashboardClient({
                 className="lg:col-span-8"
               />
               <LiveCapacityCard liveCount={stats.asistenciasHoy} className="lg:col-span-4 lg:row-span-2" />
-              <RevenueCard totalRevenue={totalIngresosEstimados} className="lg:col-span-8" />
+              {session.role !== 'empleado' && (
+                <RevenueCard totalRevenue={totalIngresosEstimados} className="lg:col-span-8" />
+              )}
               <CheckInsTable
                 checkIns={checkInsItems}
                 onRefresh={fetchAsistencias}
@@ -421,10 +428,14 @@ export default function DashboardClient({
               <QuickActionsCard
                 onRegister={() => setShowSocioModal(true)}
                 onCheckin={() => setActiveTab('asistencias')}
-                onNewPlan={() => {
-                  setActiveTab('planes');
-                  setShowPlanModal(true);
-                }}
+                onNewPlan={
+                  session.role !== 'empleado'
+                    ? () => {
+                        setActiveTab('planes');
+                        setShowPlanModal(true);
+                      }
+                    : undefined
+                }
                 onAiAnalytics={handleGenerateAi}
                 onInspector={() => setActiveTab('inspector')}
                 className="lg:sticky lg:top-6 lg:col-span-4 lg:self-start"
@@ -657,8 +668,18 @@ export default function DashboardClient({
             </div>
           )}
 
+          {/* TAB: CLASES & RESERVAS */}
+          {activeTab === 'clases' && (
+            <ClassesView
+              tenantSchema={session.tenantSchema}
+              onCheckinSuccess={() => {
+                fetchAsistencias();
+              }}
+            />
+          )}
+
           {/* TAB: PLANES */}
-          {activeTab === 'planes' && (
+          {activeTab === 'planes' && session.role !== 'empleado' && (
             <BentoCard className="p-6">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
                 <div>
@@ -701,6 +722,16 @@ export default function DashboardClient({
                   </div>
                 ))}
               </div>
+            </BentoCard>
+          )}
+
+          {activeTab === 'planes' && session.role === 'empleado' && (
+            <BentoCard className="p-12 text-center">
+              <Shield className="size-10 text-plasma mx-auto mb-3" />
+              <h3 className="font-display text-lg font-semibold text-white">Acceso Restringido</h3>
+              <p className="text-xs text-white/50 mt-1 max-w-md mx-auto">
+                Tu usuario con rol <span className="text-plasma font-mono font-medium">empleado</span> no tiene permisos para ver ni gestionar las tarifas y planes de membresía.
+              </p>
             </BentoCard>
           )}
 

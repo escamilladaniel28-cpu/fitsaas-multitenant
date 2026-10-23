@@ -1,14 +1,15 @@
 'use client'
 
-import { CreditCard, LayoutGrid, Shield, UserCheck, Users, Zap } from 'lucide-react'
+import { Calendar, CreditCard, LayoutGrid, Shield, UserCheck, Users, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export type TabKey = 'resumen' | 'socios' | 'asistencias' | 'planes' | 'inspector'
+export type TabKey = 'resumen' | 'socios' | 'asistencias' | 'clases' | 'planes' | 'inspector'
 
 const items: { label: string; key: TabKey; icon: any }[] = [
   { label: 'Resumen', key: 'resumen', icon: LayoutGrid },
   { label: 'Socios', key: 'socios', icon: Users },
   { label: 'Asistencias', key: 'asistencias', icon: UserCheck },
+  { label: 'Clases', key: 'clases', icon: Calendar },
   { label: 'Planes', key: 'planes', icon: CreditCard },
   { label: 'Inspector', key: 'inspector', icon: Shield },
 ]
@@ -16,10 +17,17 @@ const items: { label: string; key: TabKey; icon: any }[] = [
 export function FloatingSidebar({
   activeTab,
   onTabChange,
+  userRole,
 }: {
   activeTab: TabKey
   onTabChange: (tab: TabKey) => void
+  userRole?: string
 }) {
+  const visibleItems =
+    userRole === 'empleado'
+      ? items.filter((i) => ['resumen', 'socios', 'asistencias', 'clases'].includes(i.key))
+      : items
+
   return (
     <nav
       aria-label="Principal"
@@ -34,7 +42,7 @@ export function FloatingSidebar({
         <span className="sr-only">FitSaaS Core</span>
       </div>
 
-      {items.map(({ label, key, icon: Icon }) => {
+      {visibleItems.map(({ label, key, icon: Icon }) => {
         const isActive = activeTab === key
         return (
           <button
